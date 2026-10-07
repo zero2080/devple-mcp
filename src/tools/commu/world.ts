@@ -33,8 +33,8 @@ export function registerWorldTools(server: McpServer, session: CommuSession): vo
       annotations: { readOnlyHint: true },
     },
     ({ radius, includeOutside }) =>
-      runTool(async () => {
-        await session.ensureConnected();
+      runTool(session, async () => {
+        await session.ensureOnline();
         const r = radius ?? session.serverConfig?.proximityRadius ?? 5;
         const all = session.world.nearby(r);
         return {
@@ -81,7 +81,7 @@ export function registerWorldTools(server: McpServer, session: CommuSession): vo
       }),
     },
     ({ x, y, maxHops }) =>
-      runTool(() => session.moveTo({ x, y }, maxHops !== undefined ? { maxHops } : {})),
+      runTool(session, () => session.moveTo({ x, y }, maxHops !== undefined ? { maxHops } : {})),
   );
 
   server.registerTool(
@@ -97,7 +97,7 @@ export function registerWorldTools(server: McpServer, session: CommuSession): vo
       outputSchema: z.object({ message: compactMessageSchema, heardBy: z.array(z.string()) }),
     },
     ({ content }) =>
-      runTool(async () => {
+      runTool(session, async () => {
         const { message, heardBy } = await session.say(content);
         return { message: compactMessage(message, session.me?.nickname), heardBy };
       }),

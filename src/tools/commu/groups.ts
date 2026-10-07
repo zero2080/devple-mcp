@@ -34,8 +34,8 @@ export function registerGroupTools(server: McpServer, session: CommuSession): vo
       annotations: { readOnlyHint: true },
     },
     () =>
-      runTool(async () => {
-        await session.ensureConnected();
+      runTool(session, async () => {
+        await session.ensureOnline();
         const { items } = await session.client.listGroups();
         return {
           items: items.map(({ lastMessage, ...group }) => ({
@@ -56,8 +56,8 @@ export function registerGroupTools(server: McpServer, session: CommuSession): vo
       annotations: { readOnlyHint: true },
     },
     ({ groupId }) =>
-      runTool(async () => {
-        await session.ensureConnected();
+      runTool(session, async () => {
+        await session.ensureOnline();
         const detail = await session.client.getGroup(groupId);
         return { group: detail.group, members: detail.members.map(compactMember) };
       }),
@@ -73,8 +73,8 @@ export function registerGroupTools(server: McpServer, session: CommuSession): vo
       outputSchema: z.object({ group: groupSchema }),
     },
     ({ name }) =>
-      runTool(async () => {
-        await session.ensureConnected();
+      runTool(session, async () => {
+        await session.ensureOnline();
         return { group: await session.client.createGroup(name) };
       }),
   );
@@ -94,8 +94,8 @@ export function registerGroupTools(server: McpServer, session: CommuSession): vo
       annotations: { destructiveHint: true },
     },
     ({ groupId, action, name }) =>
-      runTool(async () => {
-        await session.ensureConnected();
+      runTool(session, async () => {
+        await session.ensureOnline();
         if (action === 'rename') {
           if (!name) throw new Error('rename 에는 name 이 필요해요.');
           return { ok: true as const, group: await session.client.renameGroup(groupId, name) };
@@ -130,8 +130,8 @@ export function registerGroupTools(server: McpServer, session: CommuSession): vo
       }),
     },
     ({ groupId, action, userId }) =>
-      runTool(async () => {
-        await session.ensureConnected();
+      runTool(session, async () => {
+        await session.ensureOnline();
         if (action === 'leave') {
           const myId = session.me?.id;
           if (!myId) throw new Error('내 userId 를 알 수 없어요.');
@@ -164,8 +164,8 @@ export function registerGroupTools(server: McpServer, session: CommuSession): vo
       annotations: { readOnlyHint: true },
     },
     ({ groupId, cursor, limit }) =>
-      runTool(async () => {
-        await session.ensureConnected();
+      runTool(session, async () => {
+        await session.ensureOnline();
         const page = await session.client.groupHistory(groupId, { cursor, limit });
         return { items: page.items.map((m) => compactMessage(m)), nextCursor: page.nextCursor };
       }),
@@ -181,8 +181,8 @@ export function registerGroupTools(server: McpServer, session: CommuSession): vo
       outputSchema: z.object({ message: compactMessageSchema }),
     },
     ({ groupId, content }) =>
-      runTool(async () => {
-        await session.ensureConnected();
+      runTool(session, async () => {
+        await session.ensureOnline();
         const message = await session.client.sendGroup(groupId, content);
         return { message: compactMessage(message, session.me?.nickname) };
       }),
@@ -198,8 +198,8 @@ export function registerGroupTools(server: McpServer, session: CommuSession): vo
       annotations: { idempotentHint: true },
     },
     ({ groupId, lastMessageId }) =>
-      runTool(async () => {
-        await session.ensureConnected();
+      runTool(session, async () => {
+        await session.ensureOnline();
         await session.client.readGroup(groupId, lastMessageId);
         return { ok: true as const };
       }),

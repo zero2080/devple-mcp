@@ -16,7 +16,7 @@ export function registerCommuResources(server: McpServer, session: CommuSession)
       mimeType: 'application/json',
     },
     async (uri) => {
-      await session.ensureConnected();
+      await session.ensureOnline();
       const me = session.me;
       return {
         contents: [
@@ -43,7 +43,7 @@ export function registerCommuResources(server: McpServer, session: CommuSession)
       mimeType: 'application/json',
     },
     async (uri) => {
-      await session.ensureConnected();
+      await session.ensureOnline();
       const radius = session.serverConfig?.proximityRadius ?? 5;
       return {
         contents: [

@@ -2,7 +2,7 @@
 import { z } from 'zod';
 
 import { appearanceSchema } from './appearance.js';
-import { epochMs } from './common.js';
+import { epochMs, userKindCompat } from './common.js';
 import { positionSchema } from './world.js';
 
 export const userRoleSchema = z.enum(['member', 'admin']);
@@ -13,6 +13,8 @@ export const userSchema = z.object({
   nickname: z.string(),
   appearance: appearanceSchema,
   statusMessage: z.string().optional(),
+  kind: userKindCompat,
+  ownerId: z.string().optional(), // kind='ai'일 때만
   role: userRoleSchema,
   status: userStatusSchema,
   createdAt: epochMs,
@@ -25,10 +27,30 @@ export const userProfileSchema = z.object({
 });
 
 export const meSchema = userSchema.extend({
-  email: z.string(),
-  phone: z.string(),
+  email: z.string().optional(), // AI는 없다 (DOMAIN 2.7 3.3)
+  phone: z.string().optional(),
   nicknameChangeableAt: epochMs.optional(), // API_CONTRACT 2.8: 바꿀 수 있으면 키 없음
 });
+
+/** DOMAIN 3.8 AI 계정 */
+export const aiTokenInfoSchema = z.object({
+  id: z.string(),
+  label: z.string().optional(),
+  createdAt: epochMs,
+  lastUsedAt: epochMs.optional(),
+});
+
+/** POST /me/ai/{aiId}/tokens → 201. token은 이 응답에서 한 번만 */
+export const aiTokenIssuedSchema = aiTokenInfoSchema.extend({ token: z.string() });
+
+/** GET /me/ai 항목 */
+export const myAiSchema = userSchema.extend({
+  tokens: z.array(aiTokenInfoSchema),
+  online: z.boolean(),
+});
+
+/** GET /me/ai */
+export const myAiListResponseSchema = z.object({ items: z.array(myAiSchema) });
 
 export const signupStatusSchema = z.enum(['pending', 'approved', 'rejected']);
 

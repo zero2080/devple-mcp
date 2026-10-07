@@ -14,6 +14,7 @@ export interface TilePoint {
 export interface NearbyPresence {
   userId: string;
   nickname: string;
+  kind: Presence['kind'];
   x: number;
   y: number;
   dir: Position['dir'];
@@ -96,6 +97,10 @@ export class WorldState {
     return this.presences.size;
   }
 
+  kindOf(userId: string): Presence['kind'] | undefined {
+    return this.presences.get(userId)?.kind;
+  }
+
   occupantAt(tile: TilePoint, excludeUserId?: string): Presence | undefined {
     for (const p of this.presences.values()) {
       if (p.userId === excludeUserId) continue;
@@ -114,6 +119,7 @@ export class WorldState {
         return {
           userId: p.userId,
           nickname: p.nickname,
+          kind: p.kind,
           x: p.position.x,
           y: p.position.y,
           dir: p.position.dir,

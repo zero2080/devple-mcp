@@ -25,8 +25,8 @@ export function registerSelfTools(server: McpServer, session: CommuSession): voi
       annotations: { readOnlyHint: true },
     },
     () =>
-      runTool(async () => {
-        await session.ensureConnected();
+      runTool(session, async () => {
+        await session.ensureOnline();
         const { me, config } = await session.client.getMe();
         return {
           me: compactUser(me),
@@ -57,8 +57,8 @@ export function registerSelfTools(server: McpServer, session: CommuSession): voi
       outputSchema: z.object({ me: compactUserSchema, nicknameChangeableAt: epochMs.optional() }),
     },
     ({ nickname, statusMessage }) =>
-      runTool(async () => {
-        await session.ensureConnected();
+      runTool(session, async () => {
+        await session.ensureOnline();
         const me = await session.client.patchMe({
           ...(nickname !== undefined ? { nickname } : {}),
           ...(statusMessage !== undefined ? { statusMessage } : {}),
@@ -83,8 +83,8 @@ export function registerSelfTools(server: McpServer, session: CommuSession): voi
       annotations: { idempotentHint: true },
     },
     ({ state }) =>
-      runTool(async () => {
-        await session.ensureConnected();
+      runTool(session, async () => {
+        await session.ensureOnline();
         await session.client.putPresence(state);
         return { state };
       }),

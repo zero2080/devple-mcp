@@ -2,7 +2,7 @@
 import { z } from 'zod';
 
 import { appearanceSchema } from './appearance.js';
-import { epochMs } from './common.js';
+import { epochMs, userKindCompat } from './common.js';
 
 export const directionSchema = z.enum(['up', 'down', 'left', 'right']);
 
@@ -22,6 +22,7 @@ export const presenceSchema = z.object({
   userId: z.string(),
   nickname: z.string(),
   appearance: appearanceSchema,
+  kind: userKindCompat,
   position: positionSchema,
   state: presenceStateSchema,
   updatedAt: epochMs,

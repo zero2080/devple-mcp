@@ -29,6 +29,8 @@ export class AuthManager implements TokenSource {
     private readonly http: CommuHttp,
     private readonly aiToken: string | undefined,
     private readonly clock: Clock,
+    /** 폐기·정지가 확인됐을 때 (세션이 상태를 ended 로 바꾸고 SSE 를 닫는다) */
+    private readonly onEnded?: (reason: EndedReason) => void,
   ) {}
 
   get authenticated(): boolean {
@@ -59,8 +61,10 @@ export class AuthManager implements TokenSource {
   }
 
   markEnded(reason: EndedReason): void {
+    if (this.ended) return;
     this.ended = reason;
     this.clear();
+    this.onEnded?.(reason);
   }
 
   clear(): void {

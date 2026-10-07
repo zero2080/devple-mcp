@@ -39,8 +39,8 @@ export function registerDmTools(server: McpServer, session: CommuSession): void 
       annotations: { readOnlyHint: true },
     },
     ({ cursor }) =>
-      runTool(async () => {
-        await session.ensureConnected();
+      runTool(session, async () => {
+        await session.ensureOnline();
         const page = await session.client.listDm(cursor);
         return {
           items: page.items.map((c) => ({
@@ -69,8 +69,8 @@ export function registerDmTools(server: McpServer, session: CommuSession): void 
       annotations: { readOnlyHint: true },
     },
     ({ userId, cursor, limit }) =>
-      runTool(async () => {
-        await session.ensureConnected();
+      runTool(session, async () => {
+        await session.ensureOnline();
         const page = await session.client.dmHistory(userId, { cursor, limit });
         return { items: page.items.map((m) => compactMessage(m)), nextCursor: page.nextCursor };
       }),
@@ -90,8 +90,8 @@ export function registerDmTools(server: McpServer, session: CommuSession): void 
       outputSchema: z.object({ message: compactMessageSchema }),
     },
     ({ userId, content }) =>
-      runTool(async () => {
-        await session.ensureConnected();
+      runTool(session, async () => {
+        await session.ensureOnline();
         const message = await session.client.sendDm(userId, content);
         return { message: compactMessage(message, session.me?.nickname) };
       }),
@@ -108,8 +108,8 @@ export function registerDmTools(server: McpServer, session: CommuSession): void 
       annotations: { idempotentHint: true },
     },
     ({ userId, lastMessageId }) =>
-      runTool(async () => {
-        await session.ensureConnected();
+      runTool(session, async () => {
+        await session.ensureOnline();
         await session.client.readDm(userId, lastMessageId);
         return { ok: true as const };
       }),
@@ -126,8 +126,8 @@ export function registerDmTools(server: McpServer, session: CommuSession): void 
       annotations: { destructiveHint: true },
     },
     ({ messageId }) =>
-      runTool(async () => {
-        await session.ensureConnected();
+      runTool(session, async () => {
+        await session.ensureOnline();
         await session.client.recallDm(messageId);
         return { ok: true as const };
       }),

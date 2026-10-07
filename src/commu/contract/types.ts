@@ -6,12 +6,15 @@
 // 3.1 User
 export type UserRole = 'member' | 'admin';
 export type UserStatus = 'active' | 'suspended';
+export type UserKind = 'human' | 'ai';
 
 export interface User {
   id: string;
   nickname: string; // 2~12자, 유니크
   appearance: Appearance; // 외형 (3.7)
   statusMessage?: string; // 최대 40자
+  kind: UserKind; // 3.8. 'ai'면 화면에 항상 AI 배지
+  ownerId?: string; // kind='ai'일 때만. 이 AI를 만든 회원 (항상 human)
   role: UserRole;
   status: UserStatus;
   createdAt: number;
@@ -26,8 +29,8 @@ export interface UserProfile {
 
 // 3.3 Me (본인 확장 정보)
 export interface Me extends User {
-  email: string;
-  phone: string;
+  email?: string; // kind='human'이면 항상 있음. AI는 없음
+  phone?: string; // kind='human'이면 항상 있음. AI는 없음
   nicknameChangeableAt?: number; // 다음에 닉네임을 바꿀 수 있는 시각(epoch ms). 지금 바꿀 수 있으면 키 생략 (DOMAIN 2.6 8장)
 }
 
@@ -67,6 +70,8 @@ export interface ServerConfig {
   defaultMapId: string;
   maxGroupMembers: number; // 기본 10
   avatarOptions: AvatarOptions; // 외형 선택지의 원천 (GRAPHICS 2.7·2.8)
+  maxAiPerMember: number; // 회원당 AI 수 상한, 기본 2 (3.8)
+  maxTokensPerAi: number; // AI당 활성 토큰 수 상한, 기본 2
 }
 
 /** 3.6 ServerConfig.avatarOptions. 목록마다 순서 있음(선택 UI 순서), 비어 있지 않음, 누구나 처음부터 고를 수 있다 */
@@ -101,6 +106,24 @@ export interface Appearance {
 
 /* ---------- 4. 공간 · 위치 ---------- */
 
+// 3.8 AI 계정 (사용자 결정 2026-10-07) — 주인이 발급한 AI 토큰으로 MCP 서버가 로그인한다
+export interface AiTokenInfo {
+  id: string;
+  label?: string; // 주인이 붙이는 이름 (예: '내 맥북'). 최대 40자
+  createdAt: number;
+  lastUsedAt?: number; // 마지막 로그인 교환 시각
+}
+
+export interface AiTokenIssued extends AiTokenInfo {
+  token: string; // 평문. 발급 응답에서 딱 한 번만 나간다
+}
+
+// GET /me/ai 항목: kind='ai', ownerId=나
+export interface MyAi extends User {
+  tokens: AiTokenInfo[];
+  online: boolean;
+}
+
 // 4.1 Position
 export type Direction = 'up' | 'down' | 'left' | 'right';
 
@@ -118,6 +141,7 @@ export interface Presence {
   userId: string;
   nickname: string; // 스냅샷에 포함해 User 조회 없이 렌더
   appearance: Appearance; // 3.7
+  kind: UserKind; // AI 배지를 User 조회 없이 그리기 위해
   position: Position;
   state: PresenceState;
   updatedAt: number;

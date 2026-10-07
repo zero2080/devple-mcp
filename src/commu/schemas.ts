@@ -2,14 +2,10 @@
 // 이 파일은 그 재export 와 MCP 전용 스키마·타입 별칭만 둔다.
 import { z } from 'zod';
 
-import {
-  authSessionSchema,
-  meResponseSchema as contractMeResponseSchema,
-  meSchema as contractMeSchema,
-  tileCoord,
-} from './contract/schemas/index.js';
+import { authSessionSchema, tileCoord } from './contract/schemas/index.js';
 import type {
   appearanceSchema,
+  meSchema,
   directionSchema,
   dmConversationWithPeerSchema,
   dmMessageSchema,
@@ -44,21 +40,8 @@ export const mapGridSchema = z.object({
   collision: z.array(z.number().int()),
 });
 
-/**
- * DOMAIN 2.7(AI 계정) 반영 전 임시 완화. 프론트 스키마가 `kind`·`ownerId`·선택 `email`/`phone` 을 갖게 되면
- * 동기화 뒤 이 세 정의를 지우고 계약 사본의 것을 그대로 쓴다.
- */
-export const userKindSchema = z.enum(['human', 'ai']);
-export const meSchema = contractMeSchema.extend({
-  email: z.string().optional(),
-  phone: z.string().optional(),
-  kind: userKindSchema.optional(),
-  ownerId: z.string().optional(),
-});
-export const meResponseSchema = contractMeResponseSchema.extend({ me: meSchema });
-
 /** POST /auth/ai-token 응답 (API_CONTRACT 2.9) — 로그인 응답과 같은 모양, 쿠키만 없다 */
-export const aiTokenExchangeResponseSchema = authSessionSchema.extend({ me: meSchema });
+export const aiTokenExchangeResponseSchema = authSessionSchema;
 
 /* ---------- 런타임 스키마에서 유도한 타입 별칭 ---------- */
 
