@@ -55,6 +55,10 @@ export interface FakeUser {
   online: boolean;
   position?: { x: number; y: number };
   status?: User['status'];
+  /** 기본 human. ai 면 ownerId 도 준다 */
+  kind?: User['kind'];
+  ownerId?: string;
+  statusMessage?: string;
 }
 
 export interface RecordedCall {
@@ -178,6 +182,43 @@ export class FakeCommu {
     return id;
   }
 
+  /** 상대가 나에게 DM 을 보낸다: 히스토리에 넣고 chat.dm 을 보낸다 */
+  receiveDm(peerId: string, content: string): DmMessage {
+    const peer = this.others.get(peerId);
+    if (!peer) throw new Error(`unknown peer ${peerId}`);
+    const message: DmMessage = {
+      kind: 'dm',
+      id: this.nextId(),
+      conversationId: `c_${peerId}`,
+      senderId: peerId,
+      content,
+      links: extractLinks(content),
+      createdAt: Date.now(),
+    };
+    this.dms.push(message);
+    this.emit('chat.dm', { ...message, sender: this.userOf(peer), peerId });
+    return message;
+  }
+
+  /** 다른 멤버가 그룹에 말한다: 히스토리에 넣고 chat.group 을 보낸다 */
+  receiveGroupMessage(groupId: string, senderId: string, content: string): GroupMessage {
+    const entry = this.groups.get(groupId);
+    const sender = this.others.get(senderId);
+    if (!entry || !sender) throw new Error(`unknown group ${groupId} or sender ${senderId}`);
+    const message: GroupMessage = {
+      kind: 'group',
+      id: this.nextId(),
+      groupId,
+      senderId,
+      content,
+      links: extractLinks(content),
+      createdAt: Date.now(),
+    };
+    entry.messages.push(message);
+    this.emit('chat.group', { ...message, sender: this.userOf(sender) });
+    return message;
+  }
+
   /** 서버가 모든 스트림을 끊는다 (재연결 테스트) */
   dropStreams(): void {
     for (const stream of this.streams) stream.destroy();
@@ -189,7 +230,9 @@ export class FakeCommu {
       id: fake.id,
       nickname: fake.nickname,
       appearance: defaultAppearance,
-      kind: 'human',
+      kind: fake.kind ?? 'human',
+      ...(fake.ownerId !== undefined ? { ownerId: fake.ownerId } : {}),
+      ...(fake.statusMessage !== undefined ? { statusMessage: fake.statusMessage } : {}),
       role: 'member',
       status: fake.status ?? 'active',
       createdAt: 1_700_000_000_000,
@@ -201,7 +244,7 @@ export class FakeCommu {
       userId: fake.id,
       nickname: fake.nickname,
       appearance: defaultAppearance,
-      kind: 'human',
+      kind: fake.kind ?? 'human',
       position: { mapId: 'main', ...(fake.position ?? SPAWN), dir: 'down' },
       state: 'online',
       updatedAt: Date.now(),

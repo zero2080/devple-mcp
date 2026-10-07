@@ -7,43 +7,6 @@ import { compactUser, compactUserSchema, runTool } from './shared.js';
 
 export function registerSelfTools(server: McpServer, session: CommuSession): void {
   server.registerTool(
-    'commu_me',
-    {
-      title: '내 정보',
-      description:
-        '내 계정(닉네임·상태 메시지·역할)과 서버 설정(근접 반경, 메시지 최대 길이, 그룹 최대 인원)을 돌려준다.',
-      outputSchema: z.object({
-        me: compactUserSchema,
-        nicknameChangeableAt: epochMs.optional(),
-        config: z.object({
-          proximityRadius: z.number().int(),
-          maxMessageLength: z.number().int(),
-          maxGroupMembers: z.number().int(),
-          defaultMapId: z.string(),
-        }),
-      }),
-      annotations: { readOnlyHint: true },
-    },
-    () =>
-      runTool(session, async () => {
-        await session.ensureOnline();
-        const { me, config } = await session.client.getMe();
-        return {
-          me: compactUser(me),
-          ...(me.nicknameChangeableAt !== undefined
-            ? { nicknameChangeableAt: me.nicknameChangeableAt }
-            : {}),
-          config: {
-            proximityRadius: config.proximityRadius,
-            maxMessageLength: config.maxMessageLength,
-            maxGroupMembers: config.maxGroupMembers,
-            defaultMapId: config.defaultMapId,
-          },
-        };
-      }),
-  );
-
-  server.registerTool(
     'commu_update_profile',
     {
       title: '프로필 수정',

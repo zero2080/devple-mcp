@@ -3,66 +3,9 @@ import { z } from 'zod';
 
 import { groupSchema } from '../../commu/schemas.js';
 import type { CommuSession } from '../../commu/session.js';
-import {
-  compactMember,
-  compactMemberSchema,
-  compactMessage,
-  compactMessageSchema,
-  runTool,
-} from './shared.js';
-
-const pageInput = {
-  cursor: z.string().optional().describe('이전 응답의 nextCursor'),
-  limit: z.number().int().min(1).max(100).optional().describe('페이지 크기 (기본 50)'),
-};
+import { compactMessage, compactMessageSchema, runTool } from './shared.js';
 
 export function registerGroupTools(server: McpServer, session: CommuSession): void {
-  server.registerTool(
-    'commu_groups',
-    {
-      title: '내 그룹 목록',
-      description:
-        '내가 속한 그룹을 최근 활동순으로 돌려준다. unreadCount 는 내 읽음 위치 이후 메시지 수.',
-      outputSchema: z.object({
-        items: z.array(
-          groupSchema.extend({
-            unreadCount: z.number().int(),
-            lastMessage: compactMessageSchema.optional(),
-          }),
-        ),
-      }),
-      annotations: { readOnlyHint: true },
-    },
-    () =>
-      runTool(session, async () => {
-        await session.ensureOnline();
-        const { items } = await session.client.listGroups();
-        return {
-          items: items.map(({ lastMessage, ...group }) => ({
-            ...group,
-            ...(lastMessage ? { lastMessage: compactMessage(lastMessage) } : {}),
-          })),
-        };
-      }),
-  );
-
-  server.registerTool(
-    'commu_group_detail',
-    {
-      title: '그룹 상세',
-      description: '그룹 정보와 멤버 목록(역할·가입 시각·읽음 위치). 멤버만 볼 수 있다.',
-      inputSchema: z.object({ groupId: z.string().min(1) }),
-      outputSchema: z.object({ group: groupSchema, members: z.array(compactMemberSchema) }),
-      annotations: { readOnlyHint: true },
-    },
-    ({ groupId }) =>
-      runTool(session, async () => {
-        await session.ensureOnline();
-        const detail = await session.client.getGroup(groupId);
-        return { group: detail.group, members: detail.members.map(compactMember) };
-      }),
-  );
-
   server.registerTool(
     'commu_group_create',
     {
@@ -152,26 +95,6 @@ export function registerGroupTools(server: McpServer, session: CommuSession): vo
   );
 
   server.registerTool(
-    'commu_group_history',
-    {
-      title: '그룹 메시지 히스토리',
-      description: '그룹 메시지를 최신순으로 돌려준다 (멤버 전용). 가입 전 메시지도 볼 수 있다.',
-      inputSchema: z.object({ groupId: z.string().min(1), ...pageInput }),
-      outputSchema: z.object({
-        items: z.array(compactMessageSchema),
-        nextCursor: z.string().nullable(),
-      }),
-      annotations: { readOnlyHint: true },
-    },
-    ({ groupId, cursor, limit }) =>
-      runTool(session, async () => {
-        await session.ensureOnline();
-        const page = await session.client.groupHistory(groupId, { cursor, limit });
-        return { items: page.items.map((m) => compactMessage(m)), nextCursor: page.nextCursor };
-      }),
-  );
-
-  server.registerTool(
     'commu_group_send',
     {
       title: '그룹 메시지 보내기',
@@ -185,23 +108,6 @@ export function registerGroupTools(server: McpServer, session: CommuSession): vo
         await session.ensureOnline();
         const message = await session.client.sendGroup(groupId, content);
         return { message: compactMessage(message, session.me?.nickname) };
-      }),
-  );
-
-  server.registerTool(
-    'commu_group_read',
-    {
-      title: '그룹 읽음 처리',
-      description: '내 읽음 위치를 lastMessageId 로 옮긴다 (앞으로만 움직인다).',
-      inputSchema: z.object({ groupId: z.string().min(1), lastMessageId: z.string().min(1) }),
-      outputSchema: z.object({ ok: z.literal(true) }),
-      annotations: { idempotentHint: true },
-    },
-    ({ groupId, lastMessageId }) =>
-      runTool(session, async () => {
-        await session.ensureOnline();
-        await session.client.readGroup(groupId, lastMessageId);
-        return { ok: true as const };
       }),
   );
 }
