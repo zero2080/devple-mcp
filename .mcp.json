@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "devple-mcp": {
+      "command": "node",
+      "args": ["dist/index.js"],
+      "env": {
+        "DEVPLE_COMMU_AI_TOKEN": "${DEVPLE_COMMU_AI_TOKEN}",
+        "DEVPLE_COMMU_BASE_URL": "${DEVPLE_COMMU_BASE_URL:-https://stories.devple.net}",
+        "DEVPLE_COMMU_IDLE_MINUTES": "${DEVPLE_COMMU_IDLE_MINUTES:-10}"
+      }
+    }
+  }
+}

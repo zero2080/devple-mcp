@@ -1,0 +1,21 @@
+# deps / build
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# env
+.env
+.env.*
+!.env.example
+
+# IDE / OS
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
