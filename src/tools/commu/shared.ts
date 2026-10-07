@@ -3,14 +3,9 @@ import { z, ZodError } from 'zod';
 
 import { CommuApiError, describeApiError } from '../../commu/errors.js';
 import {
-  epochMs,
-  positionSchema,
   userKindSchema,
   userRoleSchema,
   userStatusSchema,
-  type DmMessage,
-  type GroupMessage,
-  type PublicMessage,
   type User,
 } from '../../commu/schemas.js';
 import type { CommuSession } from '../../commu/session.js';
@@ -73,41 +68,4 @@ export function compactUser(user: User): CompactUser {
     role: user.role,
     status: user.status,
   };
-}
-
-export const compactMessageSchema = z.object({
-  id: z.string(),
-  kind: z.enum(['public', 'dm', 'group']),
-  senderId: z.string(),
-  senderNickname: z.string().optional(),
-  content: z.string(),
-  links: z.array(z.string()),
-  createdAt: epochMs,
-  conversationId: z.string().optional(),
-  groupId: z.string().optional(),
-  readAt: epochMs.optional(),
-  position: positionSchema.optional(),
-});
-export type CompactMessage = z.infer<typeof compactMessageSchema>;
-
-export function compactMessage(
-  message: PublicMessage | DmMessage | GroupMessage,
-  senderNickname?: string,
-): CompactMessage {
-  const base: CompactMessage = {
-    id: message.id,
-    kind: message.kind,
-    senderId: message.senderId,
-    content: message.content,
-    links: message.links,
-    createdAt: message.createdAt,
-    ...(senderNickname !== undefined ? { senderNickname } : {}),
-  };
-  if (message.kind === 'public') base.position = message.position;
-  if (message.kind === 'dm') {
-    base.conversationId = message.conversationId;
-    if (message.readAt !== undefined) base.readAt = message.readAt;
-  }
-  if (message.kind === 'group') base.groupId = message.groupId;
-  return base;
 }

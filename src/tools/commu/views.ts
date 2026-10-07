@@ -1,4 +1,4 @@
-// C2 읽기 도구의 결과 모양 (MCP.md 5.1·5.2). 다른 사용자가 쓴 값(닉네임·상태 메시지·메시지 본문·그룹 이름)은
+// 읽기(C2)·행동(C3) 도구의 결과 모양 (MCP.md 5). 다른 사용자가 쓴 값(닉네임·상태 메시지·메시지 본문·그룹 이름)은
 // untrusted 아래에만 둔다 (MCP.md 6.1). 내가 쓴 메시지 본문만 content 로 그대로 둔다.
 import { z } from 'zod';
 
@@ -6,12 +6,16 @@ import type { InboxItem, PublicItem } from '../../commu/inbox.js';
 import {
   directionSchema,
   epochMs,
+  groupRoleSchema,
   positionSchema,
   presenceStateSchema,
   userKindSchema,
   type DmMessage,
+  type Group,
   type GroupListItem,
+  type GroupMember,
   type GroupMessage,
+  type PublicMessage,
   type UserProfile,
 } from '../../commu/schemas.js';
 import { untrusted } from '../../commu/untrusted.js';
@@ -262,6 +266,81 @@ export function groupView(group: GroupListItem, myUserId: string | undefined) {
     ...(group.lastMessage ? { lastMessage: messageView(group.lastMessage, myUserId) } : {}),
     ...untrusted({ name: group.name }),
   };
+}
+
+/* ---------- C3 행동 도구 (MCP.md 5.3) ---------- */
+
+/** 내가 방금 보낸 메시지. 내 글이라 content 를 그대로 둔다 (mine: true) */
+export const sentMessageSchema = z.object({
+  id: z.string(),
+  kind: z.enum(['public', 'dm', 'group']),
+  mine: z.literal(true),
+  createdAt: epochMs,
+  links: z.array(z.string()),
+  content: z.string(),
+  conversationId: z.string().optional(),
+  groupId: z.string().optional(),
+  position: positionSchema.optional(),
+});
+
+export function sentMessage(message: PublicMessage | DmMessage | GroupMessage) {
+  return {
+    id: message.id,
+    kind: message.kind,
+    mine: true as const,
+    createdAt: message.createdAt,
+    links: message.links,
+    content: message.content,
+    ...(message.kind === 'dm' ? { conversationId: message.conversationId } : {}),
+    ...(message.kind === 'group' ? { groupId: message.groupId } : {}),
+    ...(message.kind === 'public' ? { position: message.position } : {}),
+  };
+}
+
+/** commu_say 를 들었을 사람 (반경 안 접속자) */
+export const listenerSchema = z.object({
+  userId: z.string(),
+  kind: userKindSchema,
+  distance: z.number().int(),
+  untrusted: z.object({ nickname: z.string() }),
+});
+
+export function listener(p: NearbyPresence) {
+  return {
+    userId: p.userId,
+    kind: p.kind,
+    distance: p.distance,
+    ...untrusted({ nickname: p.nickname }),
+  };
+}
+
+/** 방금 만든 그룹. 이름은 내가 넘긴 값이라 돌려주지 않는다 (남이 바꿀 수 없다 — owner 만 이름을 바꾼다) */
+export const createdGroupSchema = z.object({
+  groupId: z.string(),
+  ownerId: z.string(),
+  memberCount: z.number().int(),
+  createdAt: epochMs,
+});
+
+export function createdGroup(group: Group) {
+  return {
+    groupId: group.id,
+    ownerId: group.ownerId,
+    memberCount: group.memberCount,
+    createdAt: group.createdAt,
+  };
+}
+
+/** 초대한 멤버 (즉시 가입) */
+export const memberSchema = z.object({
+  groupId: z.string(),
+  userId: z.string(),
+  role: groupRoleSchema,
+  joinedAt: epochMs,
+});
+
+export function member(m: GroupMember) {
+  return { groupId: m.groupId, userId: m.userId, role: m.role, joinedAt: m.joinedAt };
 }
 
 /* ---------- 내부 ---------- */

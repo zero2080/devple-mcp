@@ -3,7 +3,7 @@ import { z } from 'zod';
 
 import { positionSchema } from '../../commu/schemas.js';
 import type { CommuSession } from '../../commu/session.js';
-import { compactMessage, compactMessageSchema, runTool } from './shared.js';
+import { runTool } from './shared.js';
 
 export function registerWorldTools(server: McpServer, session: CommuSession): void {
   server.registerTool(
@@ -41,24 +41,5 @@ export function registerWorldTools(server: McpServer, session: CommuSession): vo
     },
     ({ x, y, maxHops }) =>
       runTool(session, () => session.moveTo({ x, y }, maxHops !== undefined ? { maxHops } : {})),
-  );
-
-  server.registerTool(
-    'commu_say',
-    {
-      title: '근접 대화',
-      description:
-        '내 위치 기준 근접 반경 안의 접속자에게 공개 메시지를 보낸다 (말풍선). 범위 밖 사람은 듣지 못한다. ' +
-        '길이는 maxMessageLength(보통 200자) 이내, 줄바꿈 가능, 제어 문자 금지. heardBy 는 들었을 사람의 닉네임.',
-      inputSchema: z.object({
-        content: z.string().min(1).max(2000).describe('보낼 내용'),
-      }),
-      outputSchema: z.object({ message: compactMessageSchema, heardBy: z.array(z.string()) }),
-    },
-    ({ content }) =>
-      runTool(session, async () => {
-        const { message, heardBy } = await session.say(content);
-        return { message: compactMessage(message, session.me?.nickname), heardBy };
-      }),
   );
 }

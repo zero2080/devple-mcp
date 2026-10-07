@@ -1,6 +1,6 @@
 # Commu ROADMAP — devple-mcp 구현 순서
 
-> 문서 버전: 1.3 (2026-10-07, C2 완료)
+> 문서 버전: 1.4 (2026-10-07, C3 완료)
 > 최종 목표: **Claude Desktop·Code에 등록한 이 MCP 서버로 AI 계정이 운영 Commu(`stories.devple.net`)에 들어와 이동·근접 대화·DM·그룹을 한다**
 > 의존: 서버(`devple-stories`)의 AI 계정 API(API_CONTRACT 2.9). 서버가 끝나기 전에는 가짜 Commu 서버로 개발한다
 
@@ -46,15 +46,19 @@
 - [x] `read_inbox` cursor 이어 읽기, 500 초과 시 `dropped`, 돌려준 DM·그룹만 읽음 처리 (`limit: 1`이면 그 DM만 `POST …/read`, 남은 것은 다음 호출에서. 용량 2인 세션으로 `dropped: 1`)
 - [x] 모든 결과에서 다른 사용자 글이 `untrusted` 아래에만 있고 고정 안내가 붙음 (읽기 6종의 모든 결과를 모아 검사 — 닉네임 노출·읽음 처리 누락·안내 누락 변이를 각각 잡음)
 
-### C3: 행동 도구 `[ ]`
+### C3: 행동 도구 `[x]`
 
 `commu_say`, `commu_send_dm`, `commu_group_send`, `commu_group_create`, `commu_group_invite`, `commu_group_leave`, `commu_update_profile`
 
 **완료**
 
-- [ ] 각 도구가 계약 오류를 MCP.md 7의 문장으로 돌려줌
-- [ ] `429` 자동 재시도 없음, `commu_status`에 남은 대기 시간
-- [ ] 입장 전 행동 도구 → 자동 입장 후 수행
+- [x] 각 도구가 계약 오류를 MCP.md 7의 문장으로 돌려줌 (`commu.test` — `FORBIDDEN`(정지 회원 DM)·`MESSAGE_INVALID_CONTENT`(공백 본문)·`RATE_LIMITED`(근접·DM·그룹)·`NICKNAME_TAKEN`·`NICKNAME_COOLDOWN`(`nextChangeAt`)·`VALIDATION_FAILED`, 문장 뒤에 계약 JSON)
+- [x] `429` 자동 재시도 없음(가짜 서버가 받은 요청 1건), `commu_status`에 남은 대기 시간
+- [x] 입장 전 행동 도구 → 자동 입장 후 수행 (7종 각각 퇴장 뒤 호출 → `online`·SSE 1개). `404 presence`면 다시 입장해 1회 재시도(새 티켓 1개, 요청 2건)
+- [x] 행동 결과에서도 다른 사용자 글은 `untrusted` 아래에만 (읽기·행동 결과를 모아 검사 — 들은 사람 닉네임을 밖으로 빼는 변이를 잡음)
+- 변이 검사 5건 모두 잡음: 재시도 제거, 자동 입장 제거, 닉네임 untrusted 밖, `appearance` 누락, 429 문장
+- 남은 질문: `update_profile`의 `appearance` — LLM이 쓸 수 있는 아이템·색 ID(`avatarOptions`)와 현재 외형을 볼 길이 없다. chat 확인 요청 `2026-10-07-mcp-appearance-options`(계약대로 입력은 받는다)
+- 실서버 미검증 — 서버 S12a(PR 대기)가 머지되면 C5에서
 
 ### C4: 이동 `[ ]`
 
@@ -94,3 +98,4 @@ CLAUDE.md의 Commu 절과 docs/commu/ARCHITECTURE.md, docs/commu/ROADMAP.md를 �
 | 2026-10-07 | 1.1: **C0 완료**. 인증(AI 토큰 교환, MCP.md 3.2·3.4)을 C1 에서 C0 로 당김 — 환경변수를 `DEVPLE_COMMU_*` 로 바꾸면 기존 접근 키 로그인 경로가 사라져 테스트를 유지하려면 함께 가야 했음. 계약 사본은 상대 import 에 `.js` 만 붙이고 `SOURCE.json` 은 원본 sha256. 프론트 스키마가 DOMAIN 2.7 을 반영할 때까지 `src/commu/schemas.ts` 에서 `meSchema` 임시 완화(to-code info 발송). 기동 시 자동 입장 제거(MCP.md 3.1), 가짜 Commu 서버는 AI 전용, README 환경변수 선반영. 기존 `commu_*` 25종은 C1~C3 에서 MCP.md 17종으로 교체                                                                                                                                                                               |
 | 2026-10-07 | 1.2: **C1 완료**. 세션 상태 머신(idle→entering→online→leaving / ended), 단일 진행 입장, `runTool` 의 `touch()` 로 유휴 타이머 리셋, `inbox.ts` 가 `events.ts`·`commu_events` 를 대체(읽기 도구는 C2 `read_inbox`), `commu_connect/disconnect` → `commu_enter/leave`, `commu_status` 에 안 읽음(보관함 기준)·429 남은 시간·자동 퇴장까지 시간. 토큰 폐기가 세션 중 확인되면 `AuthManager` 콜백으로 `ended` + SSE 종료. 인박스 요청대로 계약 자산 재동기화(`48fd94b`, 자산 내용은 `df5a4af` 와 동일)·`meSchema` 임시 완화 제거                                                                                                                                                                                 |
 | 2026-10-07 | 1.3: **C2 완료**. 읽기 6종(`look_around`·`find_user`·`read_inbox`·`dm_history`·`list_groups`·`group_history`). REST 읽기 도구는 입장(SSE) 없이 토큰만 교환(`session.authorize()`), 메모리 도구 중 `look_around`만 입장 전 오류이고 `read_inbox`는 빈 결과 + `state`. 읽음 처리는 대화·그룹마다 보관함 순서의 마지막 메시지(id 비교 안 함), 실패는 경고만. 결과 모양은 `views.ts`에서 닉네임까지 `untrusted`로, `runTool`이 `toolResult`로 고정 안내를 붙임. 바뀐 임시 도구 11종 제거(`nearby`·`search_users`·`get_user`·`me`·`dm_conversations`·`dm_history`(교체)·`dm_read`·`groups`·`group_detail`·`group_history`(교체)·`group_read`), 서버 instructions·`commu-participant` 프롬프트의 옛 도구 이름 정리 |
+| 2026-10-07 | 1.4: **C3 완료**. 행동 7종을 MCP.md 5.3 이름·입력으로(`tools/commu/actions.ts`), `CommuSession.act` = 자동 입장 + `404 presence` 재입장 1회. 임시 도구 5종 제거(`dm_send`·`dm_recall`·`group_update`·`group_members`·`set_presence`) — 회수·이름 변경·해산·강퇴·자리비움은 MCP.md에 없다. `say`의 `heardBy`를 닉네임 배열에서 `{ userId, kind, distance, untrusted }`로(6.1). `appearance` 입력은 받되 쓸 값을 알 길이 없어 chat에 질문                                                                                                                                                                                                                                                                      |
