@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { CommuSession } from '../commu/session.js';
 import { createServer } from '../server.js';
-import { FakeCommu, TEST_AI_TOKEN } from '../test/fake-commu.js';
+import { FakeCommu, TEST_AI_TOKEN, waitUntil } from '../test/fake-commu.js';
 
 type Structured = Record<string, unknown>;
 
@@ -22,19 +22,17 @@ describe('commu_* 도구 (MCP 클라이언트 → 서버 → 가짜 Commu)', () 
     const result = await client.callTool({ name, arguments: args });
     return { result, data: (result.structuredContent ?? {}) as Structured };
   };
+  const config = () => ({
+    enabled: true,
+    aiToken: TEST_AI_TOKEN,
+    baseUrl: fake.origin,
+    apiBaseUrl: fake.baseUrl,
+    idleMinutes: 10,
+  });
 
   beforeAll(async () => {
     await fake.start();
-    session = new CommuSession(
-      {
-        enabled: true,
-        aiToken: TEST_AI_TOKEN,
-        baseUrl: fake.origin,
-        apiBaseUrl: fake.baseUrl,
-        idleMinutes: 10,
-      },
-      { hopIntervalMs: 0, map: null },
-    );
+    session = new CommuSession(config(), { hopIntervalMs: 0, map: null });
     const server = createServer({ session });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     client = new Client({ name: 'commu-tools-test', version: '0.0.0' });
@@ -42,7 +40,7 @@ describe('commu_* 도구 (MCP 클라이언트 → 서버 → 가짜 Commu)', () 
     close = async () => {
       await client.close();
       await server.close();
-      await session.disconnect();
+      await session.leave('shutdown');
       await fake.stop();
     };
   });
@@ -51,79 +49,64 @@ describe('commu_* 도구 (MCP 클라이언트 → 서버 → 가짜 Commu)', () 
     await close();
   });
 
-  it('commu_* 도구 25개와 리소스·프롬프트가 등록돼 있다', async () => {
+  it('수명 도구 3종이 있고 commu_events 는 없다 (C2 read_inbox 로 대체)', async () => {
     const { tools } = await client.listTools();
-    const names = tools.map((t) => t.name).filter((n) => n.startsWith('commu_'));
-    expect(names).toHaveLength(25);
-    expect(names).toEqual(
-      expect.arrayContaining(['commu_connect', 'commu_say', 'commu_events', 'commu_move_to']),
-    );
+    const names = tools.map((t) => t.name);
+    expect(names).toEqual(expect.arrayContaining(['commu_enter', 'commu_leave', 'commu_status']));
+    expect(names).not.toContain('commu_connect');
+    expect(names).not.toContain('commu_events');
     const { resources } = await client.listResources();
-    expect(resources.map((r) => r.uri)).toEqual(
-      expect.arrayContaining(['commu://me', 'commu://world/presences']),
-    );
-    const { prompts } = await client.listPrompts();
-    expect(prompts.map((p) => p.name)).toContain('commu-participant');
+    expect(resources.map((r) => r.uri)).toContain('commu://world/presences');
   });
 
-  it('commu_connect 와 commu_nearby', async () => {
-    const connect = await call('commu_connect');
-    expect(connect.result.isError).toBeFalsy();
-    expect(connect.data).toMatchObject({
-      state: 'connected',
-      me: { nickname: '에이전트' },
-      onlineCount: 3,
-    });
+  it('commu_status 는 입장 없이 idle 을 보고하고, commu_enter 가 입장한다', async () => {
+    const idle = await call('commu_status');
+    expect(idle.data).toMatchObject({ state: 'idle', me: null, unread: { dm: 0, group: 0 } });
+    expect(fake.calls.length).toBe(0);
 
+    const enter = await call('commu_enter');
+    expect(enter.result.isError).toBeFalsy();
+    expect(enter.data).toMatchObject({
+      me: { id: 'u1', nickname: '에이전트', kind: 'ai' },
+      position: { x: 20, y: 15 },
+      nearbyCount: 1,
+      onlineCount: 3,
+      proximityRadius: 5,
+      maxMessageLength: 200,
+    });
+    const online = await call('commu_status');
+    expect(online.data).toMatchObject({ state: 'online', sse: 'open', idle: { minutes: 10 } });
+    expect((online.data['idle'] as Structured)['leaveInSec']).toBeGreaterThan(500);
+  });
+
+  it('commu_nearby 는 kind 를 포함해 반경 안·밖을 나눈다', async () => {
     const nearby = await call('commu_nearby');
     expect(nearby.data['inRadius']).toEqual([
-      expect.objectContaining({ nickname: '도트', distance: 3, inRadius: true }),
+      expect.objectContaining({ nickname: '도트', kind: 'human', distance: 3, inRadius: true }),
     ]);
     expect((nearby.data['outside'] as unknown[]).length).toBe(1);
   });
 
-  it('commu_say 와 commu_events (waitMs 롱폴링)', async () => {
-    const status = await call('commu_status');
-    const cursor = status.data['latestEventCursor'] as number;
-
+  it('commu_say 뒤 받은 DM 이 status.unread 에 잡힌다', async () => {
     const say = await call('commu_say', { content: '반가워요!' });
     expect(say.data).toMatchObject({ heardBy: ['도트'] });
-    expect((say.data['message'] as Structured)['senderNickname']).toBe('에이전트');
-
-    const events = await call('commu_events', {
-      since: cursor,
-      types: ['chat.public'],
-      waitMs: 2000,
+    fake.emit('chat.dm', {
+      kind: 'dm',
+      id: '900',
+      conversationId: 'c_u2',
+      senderId: 'u2',
+      content: '안녕',
+      links: [],
+      createdAt: Date.now(),
+      sender: fake.userOf({ id: 'u2', nickname: '도트', online: true }),
+      peerId: 'u1',
     });
-    const list = events.data['events'] as Array<{ type: string; payload: Structured }>;
-    expect(list).toHaveLength(1);
-    expect(list[0]).toMatchObject({ type: 'chat.public', payload: { content: '반가워요!' } });
-    expect(events.data['waited']).toBe(true);
-
-    // 외부에서 들어온 DM 은 sender 가 간결한 형태로 바뀌어 온다
-    const next = events.data['nextCursor'] as number;
-    setTimeout(
-      () =>
-        fake.emit('chat.dm', {
-          kind: 'dm',
-          id: '900',
-          conversationId: 'c_u2',
-          senderId: 'u2',
-          content: '안녕',
-          links: [],
-          createdAt: Date.now(),
-          sender: fake.userOf({ id: 'u2', nickname: '도트', online: true }),
-          peerId: 'u1',
-        }),
-      30,
-    );
-    const dm = await call('commu_events', { since: next, waitMs: 2000 });
-    const dmEvents = dm.data['events'] as Array<{ type: string; payload: Structured }>;
-    expect(dmEvents[0]).toMatchObject({
-      type: 'chat.dm',
-      payload: { senderNickname: '도트', peerId: 'u1' },
+    await waitUntil(() => session.inbox.size === 1);
+    const status = await call('commu_status');
+    expect(status.data).toMatchObject({
+      unread: { dm: 1, group: 0 },
+      inbox: { size: 1, dropped: 0 },
     });
-    expect(dmEvents[0]!.payload).not.toHaveProperty('sender');
   });
 
   it('commu_move_to', async () => {
@@ -131,22 +114,27 @@ describe('commu_* 도구 (MCP 클라이언트 → 서버 → 가짜 Commu)', () 
     expect(move.data).toMatchObject({ reached: true, hops: 2, position: { x: 20, y: 21 } });
   });
 
-  it('계약 에러는 isError 결과로 돌아온다', async () => {
+  it('계약 에러는 MCP.md 7 문장 + 계약 JSON 으로 돌아온다', async () => {
     const self = await call('commu_dm_send', { userId: 'u1', content: '나에게' });
     expect(self.result.isError).toBe(true);
     const text = (self.result.content[0] as { text: string }).text;
-    expect(text).toContain('VALIDATION_FAILED');
-    expect(text).toContain('"userId":"invalid"');
+    expect(text).toMatch(/^입력이 올바르지 않습니다 \(userId: invalid\)/);
+    expect(text).toContain('"code":"VALIDATION_FAILED"');
+
+    fake.rateLimitNextMessage(7);
+    const limited = await call('commu_say', { content: '빨리' });
+    expect(limited.result.isError).toBe(true);
+    expect((limited.result.content[0] as { text: string }).text).toContain('7초 뒤에 다시 하세요');
+    const status = await call('commu_status');
+    expect(status.data['rateLimit']).toEqual({ retryAfterSec: 7 });
   });
 
   it('DM·그룹 흐름', async () => {
     const sent = await call('commu_dm_send', { userId: 'u2', content: '따로 이야기해요' });
     expect((sent.data['message'] as Structured)['conversationId']).toBe('c_u2');
     const convs = await call('commu_dm_conversations');
-    expect((convs.data['items'] as Structured[])[0]).toMatchObject({ peer: { nickname: '도트' } });
-    const history = await call('commu_dm_history', { userId: 'u2' });
-    expect((history.data['items'] as Structured[])[0]).toMatchObject({
-      content: '따로 이야기해요',
+    expect((convs.data['items'] as Structured[])[0]).toMatchObject({
+      peer: { nickname: '도트', kind: 'human' },
     });
 
     const created = await call('commu_group_create', { name: '도트 모임' });
@@ -159,24 +147,23 @@ describe('commu_* 도구 (MCP 클라이언트 → 서버 → 가짜 Commu)', () 
     ]);
     const msg = await call('commu_group_send', { groupId, content: '모임 시작!' });
     expect((msg.data['message'] as Structured)['groupId']).toBe(groupId);
-    const groups = await call('commu_groups');
-    expect((groups.data['items'] as Structured[])[0]).toMatchObject({
-      name: '도트 모임',
-      memberCount: 2,
-    });
     const dissolve = await call('commu_group_update', { groupId, action: 'dissolve' });
     expect(dissolve.data).toEqual({ ok: true });
   });
 
+  it('commu_leave 뒤 status 는 idle, 행동 도구는 자동 재입장한다', async () => {
+    const leave = await call('commu_leave');
+    expect(leave.data).toEqual({ left: true });
+    expect((await call('commu_status')).data).toMatchObject({ state: 'idle' });
+    await waitUntil(() => fake.streamCount === 0);
+    const say = await call('commu_say', { content: '다시 왔어요' });
+    expect(say.result.isError).toBeFalsy();
+    expect((await call('commu_status')).data).toMatchObject({ state: 'online' });
+  });
+
   it('토큰이 없으면 서버는 뜨고 commu_* 도구는 안내 오류를 돌려준다 (MCP.md 2)', async () => {
     const disabled = new CommuSession(
-      {
-        enabled: false,
-        aiToken: undefined,
-        baseUrl: fake.origin,
-        apiBaseUrl: fake.baseUrl,
-        idleMinutes: 10,
-      },
+      { ...config(), enabled: false, aiToken: undefined },
       { map: null },
     );
     const server = createServer({ session: disabled });
@@ -186,11 +173,12 @@ describe('commu_* 도구 (MCP 클라이언트 → 서버 → 가짜 Commu)', () 
     try {
       const exchangesBefore = fake.exchangeCount;
       const status = await c.callTool({ name: 'commu_status', arguments: {} });
-      expect(status.isError).toBeFalsy();
-      expect(status.structuredContent).toMatchObject({ state: 'disconnected' });
-      const connect = await c.callTool({ name: 'commu_connect', arguments: {} });
-      expect(connect.isError).toBe(true);
-      expect((connect.content[0] as { text: string }).text).toContain('토큰이 설정되지 않았습니다');
+      expect(status.structuredContent).toMatchObject({ state: 'idle' });
+      const enter = await c.callTool({ name: 'commu_enter', arguments: {} });
+      expect(enter.isError).toBe(true);
+      expect((enter.content[0] as { text: string }).text).toContain('토큰이 설정되지 않았습니다');
+      const say = await c.callTool({ name: 'commu_say', arguments: { content: 'x' } });
+      expect(say.isError).toBe(true);
       expect(fake.exchangeCount).toBe(exchangesBefore);
     } finally {
       await c.close();
@@ -205,13 +193,10 @@ describe('commu_* 도구 (MCP 클라이언트 → 서버 → 가짜 Commu)', () 
       '도트',
       '멀리',
     ]);
-
     const prompt = await client.getPrompt({
       name: 'commu-participant',
       arguments: { goal: '인사하기' },
     });
-    const text = (prompt.messages[0]?.content as { text: string }).text;
-    expect(text).toContain('commu_connect');
-    expect(text).toContain('인사하기');
+    expect((prompt.messages[0]?.content as { text: string }).text).toContain('인사하기');
   });
 });

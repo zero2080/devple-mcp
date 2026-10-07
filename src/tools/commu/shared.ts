@@ -1,19 +1,15 @@
 import type { CallToolResult } from '@modelcontextprotocol/server';
 import { z, ZodError } from 'zod';
 
-import { CommuApiError } from '../../commu/errors.js';
+import { CommuApiError, describeApiError } from '../../commu/errors.js';
 import {
-  chatDmEventSchema,
-  chatGroupEventSchema,
   directionSchema,
   epochMs,
-  groupUpdatedEventSchema,
   positionSchema,
-  presenceSchema,
   presenceStateSchema,
+  userKindSchema,
   userRoleSchema,
   userStatusSchema,
-  worldSnapshotPayloadSchema,
   type DmMessage,
   type GroupMemberWithUser,
   type GroupMessage,
@@ -21,6 +17,7 @@ import {
   type PublicMessage,
   type User,
 } from '../../commu/schemas.js';
+import type { CommuSession } from '../../commu/session.js';
 import { log } from '../../logger.js';
 
 /* ---------- 결과 포장 ---------- */
@@ -36,8 +33,15 @@ export function toolError(error: unknown): CallToolResult {
   return { isError: true, content: [{ type: 'text', text: describeError(error) }] };
 }
 
-/** 도구 본문을 감싸 예외를 isError 결과로 바꾼다. LLM 이 에러 코드·details 를 읽고 대응할 수 있게 */
-export async function runTool<T extends object>(fn: () => Promise<T>): Promise<CallToolResult> {
+/**
+ * 도구 본문을 감싼다: 유휴 타이머 리셋(MCP.md 3.3), 예외 → isError 결과(MCP.md 7).
+ * LLM 이 에러 코드·details 를 읽고 대응할 수 있게 계약 형식을 그대로 싣는다.
+ */
+export async function runTool<T extends object>(
+  session: CommuSession,
+  fn: () => Promise<T>,
+): Promise<CallToolResult> {
+  session.touch();
   try {
     return toolOk(await fn());
   } catch (error) {
@@ -47,12 +51,7 @@ export async function runTool<T extends object>(fn: () => Promise<T>): Promise<C
 }
 
 export function describeError(error: unknown): string {
-  if (error instanceof CommuApiError) {
-    const lines = [`Commu API 오류 ${error.code} (HTTP ${error.status}): ${error.message}`];
-    if (error.details) lines.push(`details: ${JSON.stringify(error.details)}`);
-    if (error.retryAfterSec !== undefined) lines.push(`retryAfterSec: ${error.retryAfterSec}`);
-    return lines.join('\n');
-  }
+  if (error instanceof CommuApiError) return describeApiError(error);
   if (error instanceof ZodError) {
     return `응답 형식이 계약과 달라요: ${error.message}`;
   }
@@ -65,6 +64,8 @@ export function describeError(error: unknown): string {
 export const compactUserSchema = z.object({
   id: z.string(),
   nickname: z.string(),
+  kind: userKindSchema,
+  ownerId: z.string().optional(),
   statusMessage: z.string().optional(),
   role: userRoleSchema,
   status: userStatusSchema,
@@ -75,6 +76,8 @@ export function compactUser(user: User): CompactUser {
   return {
     id: user.id,
     nickname: user.nickname,
+    kind: user.kind,
+    ...(user.ownerId !== undefined ? { ownerId: user.ownerId } : {}),
     ...(user.statusMessage !== undefined ? { statusMessage: user.statusMessage } : {}),
     role: user.role,
     status: user.status,
@@ -84,6 +87,7 @@ export function compactUser(user: User): CompactUser {
 export const compactPresenceSchema = z.object({
   userId: z.string(),
   nickname: z.string(),
+  kind: userKindSchema,
   x: z.number().int(),
   y: z.number().int(),
   dir: directionSchema,
@@ -94,6 +98,7 @@ export function compactPresence(p: Presence) {
   return {
     userId: p.userId,
     nickname: p.nickname,
+    kind: p.kind,
     x: p.position.x,
     y: p.position.y,
     dir: p.position.dir,
@@ -161,50 +166,4 @@ export function compactMember(member: GroupMemberWithUser) {
       ? { lastReadMessageId: member.lastReadMessageId }
       : {}),
   };
-}
-
-/** SSE payload 에서 외형 같은 렌더 전용 필드를 걷어낸다. 모르는 타입은 그대로 */
-export function compactEventPayload(type: string, payload: unknown): unknown {
-  switch (type) {
-    case 'chat.dm': {
-      const parsed = chatDmEventSchema.safeParse(payload);
-      if (!parsed.success) return payload;
-      const { sender, peerId, ...message } = parsed.data;
-      return { ...compactMessage(message, sender.nickname), peerId };
-    }
-    case 'chat.group': {
-      const parsed = chatGroupEventSchema.safeParse(payload);
-      if (!parsed.success) return payload;
-      const { sender, ...message } = parsed.data;
-      return compactMessage(message, sender.nickname);
-    }
-    case 'presence.joined': {
-      const parsed = presenceSchema.safeParse(payload);
-      return parsed.success ? compactPresence(parsed.data) : payload;
-    }
-    case 'presence.updated': {
-      if (payload && typeof payload === 'object' && 'appearance' in payload) {
-        const { appearance: _appearance, ...rest } = payload as Record<string, unknown>;
-        return { ...rest, appearanceChanged: true };
-      }
-      return payload;
-    }
-    case 'group.updated': {
-      const parsed = groupUpdatedEventSchema.safeParse(payload);
-      if (!parsed.success) return payload;
-      const { members, ...group } = parsed.data;
-      return { ...group, members: members.map(compactMember) };
-    }
-    case 'world.snapshot': {
-      const parsed = worldSnapshotPayloadSchema.safeParse(payload);
-      if (!parsed.success) return payload;
-      return {
-        mapId: parsed.data.mapId,
-        serverTime: parsed.data.serverTime,
-        presences: parsed.data.presences.map(compactPresence),
-      };
-    }
-    default:
-      return payload;
-  }
 }

@@ -48,3 +48,4 @@ pnpm typecheck && pnpm lint && pnpm test && pnpm format:check && pnpm build
 - **코드 변경 전 리뷰 요청(필수)**: 파일을 쓰기 전에 변경 파일 목록·이유·전체 내용·계약 영향·테스트 계획을 보여 주고 승인을 받는다. 단계적으로, 동종 파일은 한 묶음으로.
 - 계약 자산(`src/commu/contract/`)은 손으로 고치지 않는다 → `scripts/sync-commu-contract.sh`.
 - 완료 기준: 검증 5종 통과 + ROADMAP 체크박스·결정 이력 갱신. 실서버 미검증이면 그렇게 적는다.
+- **단계(ROADMAP Cn)가 끝나면 Claude 가 브랜치를 만들어 커밋·푸시하고 PR 을 연다** (사용자 지시 2026-10-07). 브랜치 `feat/commu-c<n>-<slug>`, 커밋은 Conventional Commits + 한국어 제목, 푸시는 `DEVPLE_GITHUB_TOKEN`. 머지는 사용자가 한다.

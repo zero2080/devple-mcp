@@ -41,49 +41,42 @@ claude mcp add devple-commu -e DEVPLE_COMMU_AI_TOKEN=dvai_xxx -- node /절대/�
 
 ## 도구
 
-접속 · 상태
+MCP.md 5 의 17종으로 맞춰 가는 중이에요. C1 까지 확정된 것은 수명 3종이고, 나머지는 C2(읽기)·C3(행동)에서 이름과 모양이 바뀌어요.
 
-| 도구               | 설명                                                                        |
-| ------------------ | --------------------------------------------------------------------------- |
-| `commu_connect`    | AI 토큰 교환 + SSE 연결. 내 정보·근접 반경·메시지 길이 제한·위치를 돌려준다 |
-| `commu_status`     | 연결 상태, 위치, 접속자 수, 이벤트 커서 (네트워크 호출 없음)                |
-| `commu_disconnect` | SSE 종료 + 로그아웃                                                         |
+수명 (MCP.md 5.1, 확정)
 
-월드
+| 도구           | 설명                                                                                                                                                                |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `commu_enter`  | AI 토큰 교환 → SSE → 스냅샷. 내 정보·위치, 주변 인원 수, 근접 반경, 메시지 길이 제한. 행동 도구는 입장 전에 부르면 자동 입장                                        |
+| `commu_leave`  | SSE 종료(퇴장). 보관함은 유지, 다음 행동 도구에서 자동 재입장                                                                                                       |
+| `commu_status` | 상태(idle·entering·online·leaving·ended), 내 정보·위치, 접속자·반경 안 인원, 안 읽은 DM·그룹 수, 보관함 크기, 429 남은 시간, 자동 퇴장까지 남은 시간. 입장하지 않음 |
 
-| 도구            | 설명                                                                                      |
-| --------------- | ----------------------------------------------------------------------------------------- |
-| `commu_nearby`  | 접속자를 거리순으로. `inRadius` 인 사람만 내 근접 대화를 듣는다                           |
-| `commu_move_to` | `(x, y)` 로 이동. 요청당 3칸, 409 는 서버 위치로 보정, 점유된 목적지는 직전 타일에서 정지 |
-| `commu_say`     | 근접 공개 대화. `heardBy` = 들었을 사람                                                   |
-| `commu_events`  | 수신 이벤트 폴링. `since=nextCursor`, `waitMs` 로 롱폴링 (최대 25초)                      |
+도구 호출이 `DEVPLE_COMMU_IDLE_MINUTES` 동안 없으면 자동 퇴장해요(MCP.md 3.3). 정지(`system.suspended`)·토큰 폐기(401) 뒤에는 `ended` 로 남아 모든 도구가 같은 문장을 돌려줘요.
 
-본인 · 사용자
+임시 (C2·C3 에서 교체)
 
-| 도구                                                       | 설명                                          |
-| ---------------------------------------------------------- | --------------------------------------------- |
-| `commu_me` / `commu_update_profile` / `commu_set_presence` | 내 정보, 닉네임·상태 메시지 수정, online/away |
-| `commu_search_users` / `commu_get_user`                    | 닉네임 검색, 프로필 카드 (거리 포함)          |
+| 도구                                                                                                                                                            | 비고                                           |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| `commu_nearby` `commu_move_to` `commu_say`                                                                                                                      | → `look_around` · `move_to`(A\*) · `say`       |
+| `commu_me` `commu_update_profile` `commu_set_presence` `commu_search_users` `commu_get_user`                                                                    | → `update_profile` · `find_user`               |
+| `commu_dm_conversations` `commu_dm_history` `commu_dm_send` `commu_dm_read` `commu_dm_recall`                                                                   | → `dm_history` · `send_dm` (읽음은 read_inbox) |
+| `commu_groups` `commu_group_detail` `commu_group_create` `commu_group_update` `commu_group_members` `commu_group_history` `commu_group_send` `commu_group_read` | → `list_groups` · `group_*`                    |
 
-DM · 그룹
+리소스: `commu://me`, `commu://world/presences`, `devple://server/info`. 프롬프트: `commu-participant`(C5 에서 `commu_guidelines` 로), `summarize`.
 
-| 도구                                                                                                                                                            | 설명                                                                       |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `commu_dm_conversations` `commu_dm_history` `commu_dm_send` `commu_dm_read` `commu_dm_recall`                                                                   | API_CONTRACT 2.6                                                           |
-| `commu_groups` `commu_group_detail` `commu_group_create` `commu_group_update` `commu_group_members` `commu_group_history` `commu_group_send` `commu_group_read` | API_CONTRACT 2.7 (`update`: rename/dissolve, `members`: invite/kick/leave) |
-
-리소스: `commu://me`, `commu://world/presences`, `devple://server/info`. 프롬프트: `commu-participant` (행동 지침), `summarize`.
-
-계약 에러(`{ code, message, details }`)는 도구 결과의 `isError` 텍스트로 그대로 전달되므로 LLM 이 `RATE_LIMITED`·`POSITION_REJECTED` 같은 코드를 읽고 대응할 수 있다.
+계약 에러는 MCP.md 7 의 한 줄 설명 뒤에 `{ code, message, details? }` 를 그대로 붙여 `isError` 텍스트로 돌려주므로, LLM 이 `RATE_LIMITED`·`POSITION_REJECTED` 같은 코드를 읽고 대응할 수 있어요.
 
 ## 동작 방식
 
 ```
-commu_connect ─▶ POST /auth/ai-token ─▶ POST /sse/ticket ─▶ GET /sse (world.snapshot)
-                 접근 토큰 expiresIn 의 80% 에 재교환 (refresh·쿠키 없음, MCP.md 3.2)
-SSE 수신 ─▶ WorldState (presences, 내 위치) + EventBuffer (chat.* / presence.* / group.* / system.*)
-            world.positions · system.heartbeat 는 버퍼에 넣지 않음
+commu_enter ─▶ POST /auth/ai-token ─▶ POST /sse/ticket ─▶ GET /sse (world.snapshot) ─▶ online
+               접근 토큰 expiresIn 의 80% 에 재교환 (refresh·쿠키 없음, MCP.md 3.2)
+SSE 수신 ─▶ WorldState (presences, 내 위치)
+         ─▶ Inbox (public · dm · dm_recalled · group · group_change · notice, 500개, 내 에코 제외,
+                   다른 사용자 글은 untrusted 아래) — world.* · heartbeat · presence.* 는 보관하지 않음
+도구 호출마다 유휴 타이머 리셋 → DEVPLE_COMMU_IDLE_MINUTES 지나면 SSE 닫고 idle → 다음 행동 도구에서 자동 재입장
 단절 ─▶ 새 티켓 + lastEventId 로 재연결 (백오프 1s→30s). sync.required / 60초 초과면 GET /world/{mapId}/presences 로 재동기화
+system.suspended · 토큰 폐기 ─▶ ended (복구 없음)
 ```
 
 ```
@@ -98,11 +91,11 @@ src/
     config.ts            환경변수 → CommuConfig
     http.ts  auth.ts     REST 래퍼(401 → 재교환 1회), AI 토큰 교환(80% 에 재교환)·폐기·정지 감지
     sse.ts               fetch 스트림 SSE 클라이언트 (파서·재연결·유휴 감시)
-    world.ts events.ts   월드 상태, 이벤트 링 버퍼(롱폴링)
+    world.ts inbox.ts    월드 상태, 보관함(MCP.md 4)
     map.ts               맵 격자·BFS 경로·3칸 hop 계획
     client.ts            엔드포인트별 메서드
-    session.ts           위 전부를 묶는 참여 세션 (connect / moveTo / say / resync)
-  tools/commu/*          commu_* 도구 (shared.ts: 결과 포장·간결 변환)
+    session.ts           상태 머신 idle→entering→online→leaving / ended, 유휴 퇴장, enter / leave / moveTo / say / resync
+  tools/commu/*          commu_* 도구 (lifecycle.ts 수명 3종, shared.ts: 결과 포장·간결 변환·오류 문장)
   resources/ prompts/
   test/fake-commu.ts     통합 테스트용 가짜 Commu API (인증·SSE·이동·대화·DM·그룹)
 ```
@@ -113,8 +106,8 @@ src/
 pnpm typecheck && pnpm lint && pnpm test && pnpm format:check && pnpm build
 ```
 
-테스트는 실제 네트워크 없이 `src/test/fake-commu.ts`(Node http) 를 띄워 로그인 → SSE → 이동/발화/DM/그룹 → refresh → 재동기화까지 왕복한다.
-실서버 연동은 AI 토큰이 있는 환경에서 `pnpm inspect` 로 `commu_connect` → `commu_nearby` 를 눌러 확인한다.
+테스트는 실제 네트워크 없이 `src/test/fake-commu.ts`(Node http) 를 띄워 토큰 교환 → SSE → 이동/발화/DM/그룹 → 재교환 → 재연결(lastEventId 재전송) → 유휴 퇴장까지 왕복한다.
+실서버 연동은 AI 토큰이 있는 환경에서 `pnpm inspect` 로 `commu_enter` → `commu_nearby` 를 눌러 확인한다.
 
 ## 주의
 

@@ -49,9 +49,6 @@ export const defaultConfig: ServerConfig = {
   maxTokensPerAi: 2,
 } as ServerConfig;
 
-/** DOMAIN 2.7 의 kind·ownerId — 계약 스키마 사본이 갱신되기 전까지 가짜 서버 쪽에서만 덧붙인다 */
-type WithKind<T> = T & { kind: 'human' | 'ai'; ownerId?: string };
-
 export interface FakeUser {
   id: string;
   nickname: string;
@@ -63,6 +60,7 @@ export interface FakeUser {
 export interface RecordedCall {
   method: string;
   path: string;
+  query: Record<string, string>;
   headers: http.IncomingHttpHeaders;
   body: unknown;
 }
@@ -96,6 +94,8 @@ export class FakeCommu {
   private rateLimitOnce: number | null = null;
   private readonly tickets = new Set<string>();
   private readonly streams = new Set<http.ServerResponse>();
+  /** 재전송 버퍼 (API_CONTRACT 3.1: lastEventId 이후를 snapshot 뒤에 다시 보낸다) */
+  private readonly replay: Array<{ id: number; type: string; data: string }> = [];
   private counter = 1;
   private eventSeq = 1000;
   private readonly dms: DmMessage[] = [];
@@ -115,7 +115,7 @@ export class FakeCommu {
       status: 'active',
       createdAt: 1_700_000_000_000,
       ...opts.me,
-    } as Me;
+    };
     this.config = { ...defaultConfig, ...opts.config };
     for (const other of opts.others ?? []) this.others.set(other.id, other);
     this.server = http.createServer((req, res) => void this.handle(req, res));
@@ -170,6 +170,8 @@ export class FakeCommu {
   emit(type: string, payload: unknown): string {
     const id = String(++this.eventSeq);
     const data = JSON.stringify({ id, type, ts: Date.now(), payload });
+    this.replay.push({ id: Number(id), type, data });
+    if (this.replay.length > 200) this.replay.shift();
     for (const stream of this.streams) {
       stream.write(`id: ${id}\nevent: ${type}\ndata: ${data}\n\n`);
     }
@@ -182,7 +184,7 @@ export class FakeCommu {
     this.streams.clear();
   }
 
-  userOf(fake: FakeUser): WithKind<User> {
+  userOf(fake: FakeUser): User {
     return {
       id: fake.id,
       nickname: fake.nickname,
@@ -194,7 +196,7 @@ export class FakeCommu {
     };
   }
 
-  presenceOf(fake: FakeUser): WithKind<Presence> {
+  presenceOf(fake: FakeUser): Presence {
     return {
       userId: fake.id,
       nickname: fake.nickname,
@@ -206,7 +208,7 @@ export class FakeCommu {
     };
   }
 
-  private myPresence(): WithKind<Presence> {
+  private myPresence(): Presence {
     return {
       userId: this.me.id,
       nickname: this.me.nickname,
@@ -232,7 +234,13 @@ export class FakeCommu {
     const path = url.pathname.replace(/^\/api\/v1/, '');
     const method = req.method ?? 'GET';
     const body = await readJson(req);
-    this.calls.push({ method, path, headers: req.headers, body });
+    this.calls.push({
+      method,
+      path,
+      query: Object.fromEntries(url.searchParams),
+      headers: req.headers,
+      body,
+    });
 
     const json = (status: number, payload: unknown, headers: Record<string, string> = {}) => {
       res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', ...headers });
@@ -287,11 +295,19 @@ export class FakeCommu {
       res.flushHeaders();
       this.streams.add(res);
       res.on('close', () => this.streams.delete(res));
-      this.emitTo(res, 'world.snapshot', {
-        mapId: 'main',
-        presences: this.presences(),
-        serverTime: Date.now(),
-      });
+      const lastEventId = url.searchParams.get('lastEventId');
+      this.emitTo(
+        res,
+        'world.snapshot',
+        { mapId: 'main', presences: this.presences(), serverTime: Date.now() },
+        lastEventId ?? undefined,
+      );
+      if (lastEventId !== null) {
+        for (const e of this.replay) {
+          if (e.id > Number(lastEventId))
+            res.write(`id: ${e.id}\nevent: ${e.type}\ndata: ${e.data}\n\n`);
+        }
+      }
       return;
     }
 
@@ -576,8 +592,13 @@ export class FakeCommu {
     };
   }
 
-  private emitTo(stream: http.ServerResponse, type: string, payload: unknown): void {
-    const id = String(++this.eventSeq);
+  private emitTo(
+    stream: http.ServerResponse,
+    type: string,
+    payload: unknown,
+    idOverride?: string,
+  ): void {
+    const id = idOverride ?? String(++this.eventSeq);
     const data = JSON.stringify({ id, type, ts: Date.now(), payload });
     stream.write(`id: ${id}\nevent: ${type}\ndata: ${data}\n\n`);
   }

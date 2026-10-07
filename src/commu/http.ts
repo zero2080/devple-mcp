@@ -29,12 +29,26 @@ export interface RequestOptions<T> {
  */
 export class CommuHttp {
   tokenSource: TokenSource | null = null;
+  /** 마지막 429 의 Retry-After 가 끝나는 시각 (MCP.md 6.3: 재시도는 하지 않고 알려만 준다) */
+  rateLimitedUntil: number | null = null;
 
   constructor(
     private readonly baseUrl: string,
     private readonly fetchImpl: typeof fetch = globalThis.fetch,
     private readonly timeoutMs = 10_000,
+    private readonly now: () => number = Date.now,
   ) {}
+
+  /** 429 뒤 남은 대기 시간(초). 없으면 null */
+  rateLimitRemainingSec(): number | null {
+    if (this.rateLimitedUntil === null) return null;
+    const remaining = Math.ceil((this.rateLimitedUntil - this.now()) / 1000);
+    if (remaining <= 0) {
+      this.rateLimitedUntil = null;
+      return null;
+    }
+    return remaining;
+  }
 
   url(path: string, query?: QueryParams): string {
     const url = new URL(this.baseUrl + path);
@@ -67,6 +81,11 @@ export class CommuHttp {
     if (res.ok) return res;
 
     const body = await readErrorBody(res);
+    if (res.status === 429) {
+      const error = toApiError(res, body);
+      this.rateLimitedUntil = this.now() + (error.retryAfterSec ?? 1) * 1000;
+      throw error;
+    }
     if (
       res.status === 401 &&
       auth &&

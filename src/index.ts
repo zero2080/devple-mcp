@@ -24,7 +24,7 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   shuttingDown = true;
   log.info(`received ${signal}, shutting down`);
   try {
-    await session.disconnect();
+    await session.leave('shutdown');
   } catch (error) {
     log.warn('disconnect failed', error);
   }

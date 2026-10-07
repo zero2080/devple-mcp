@@ -12,6 +12,9 @@ export const serverConfigSchema = z.object({
   defaultMapId: z.string(),
   maxGroupMembers: z.number().int().positive(),
   avatarOptions: avatarOptionsSchema,
+  // DOMAIN 2.7 3.6. 서버 2.9 배포 전에는 안 오므로 기본 2 (하위 호환 — 서버가 보내면 그 값)
+  maxAiPerMember: z.number().int().positive().default(2),
+  maxTokensPerAi: z.number().int().positive().default(2),
 });
 
 export const authSessionSchema = z.object({

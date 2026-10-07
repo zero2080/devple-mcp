@@ -41,8 +41,8 @@ export function registerUserTools(server: McpServer, session: CommuSession): voi
       annotations: { readOnlyHint: true },
     },
     ({ nickname }) =>
-      runTool(async () => {
-        await session.ensureConnected();
+      runTool(session, async () => {
+        await session.ensureOnline();
         const { items } = await session.client.searchUsers(nickname);
         return { items: items.map(withDistance) };
       }),
@@ -59,8 +59,8 @@ export function registerUserTools(server: McpServer, session: CommuSession): voi
       annotations: { readOnlyHint: true },
     },
     ({ userId }) =>
-      runTool(async () => {
-        await session.ensureConnected();
+      runTool(session, async () => {
+        await session.ensureOnline();
         return withDistance(await session.client.getUser(userId));
       }),
   );
