@@ -11,7 +11,7 @@ import {
   type EndedReason,
 } from './errors.js';
 import { CommuHttp } from './http.js';
-import { Inbox } from './inbox.js';
+import { Inbox, type InboxItem } from './inbox.js';
 import { findPath, isBlocked, planHops, straightHops, type Hop, type MapGrid } from './map.js';
 import {
   mapGridSchema,
@@ -178,6 +178,63 @@ export class CommuSession {
       });
     }
     return this.entering;
+  }
+
+  /**
+   * REST 읽기 도구용 (C2): 입장(SSE) 없이 접근 토큰만 확보한다. 월드에 나타나지 않고 히스토리·검색을 할 수 있다.
+   * 토큰 없음·폐기·정지는 다른 도구와 같은 오류
+   */
+  async authorize(): Promise<void> {
+    if (!this.config.enabled) throw new CommuDisabledError();
+    if (this.auth.ended) throw new CommuEndedError(this.auth.ended);
+    if (!this.auth.authenticated) await this.auth.exchange();
+  }
+
+  /**
+   * read_inbox 가 돌려준 DM·그룹 메시지를 대화·그룹마다 마지막 것까지 읽음 처리한다 (MCP.md 5.2, ARCHITECTURE 5).
+   * 보관함은 도착 순서라 마지막 항목이 그 대화의 최신이다 (id 는 불투명 문자열이라 비교하지 않는다).
+   * 실패해도 예외를 던지지 않고 stderr 경고만 — 도구는 성공으로 돌려준다
+   */
+  async markRead(items: readonly InboxItem[]): Promise<{ dm: number; group: number }> {
+    const dm = new Map<string, string>();
+    const group = new Map<string, string>();
+    for (const item of items) {
+      if (item.type === 'dm') dm.set(item.from.userId, item.messageId);
+      else if (item.type === 'group') group.set(item.groupId, item.messageId);
+    }
+    if (dm.size === 0 && group.size === 0) return { dm: 0, group: 0 };
+    try {
+      await this.authorize();
+    } catch (error) {
+      log.warn('read_inbox: 읽음 처리를 건너뜀', {
+        reason: error instanceof Error ? error.name : 'error',
+      });
+      return { dm: 0, group: 0 };
+    }
+    const settle = async (kind: 'dm' | 'group', calls: Promise<void>[]) => {
+      const results = await Promise.allSettled(calls);
+      for (const result of results) {
+        if (result.status === 'rejected') {
+          const e: unknown = result.reason;
+          log.warn('read_inbox: 읽음 처리 실패', {
+            kind,
+            ...(e instanceof CommuApiError ? { status: e.status, code: e.code } : {}),
+          });
+        }
+      }
+      return results.filter((r) => r.status === 'fulfilled').length;
+    };
+    const [dmCount, groupCount] = await Promise.all([
+      settle(
+        'dm',
+        [...dm].map(([userId, messageId]) => this.client.readDm(userId, messageId)),
+      ),
+      settle(
+        'group',
+        [...group].map(([groupId, messageId]) => this.client.readGroup(groupId, messageId)),
+      ),
+    ]);
+    return { dm: dmCount, group: groupCount };
   }
 
   /** 행동 도구용: 입장돼 있지 않으면 자동 입장 */

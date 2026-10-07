@@ -3,50 +3,9 @@ import { z } from 'zod';
 
 import { positionSchema } from '../../commu/schemas.js';
 import type { CommuSession } from '../../commu/session.js';
-import { compactMessage, compactMessageSchema, nearbyPresenceSchema, runTool } from './shared.js';
+import { compactMessage, compactMessageSchema, runTool } from './shared.js';
 
 export function registerWorldTools(server: McpServer, session: CommuSession): void {
-  server.registerTool(
-    'commu_nearby',
-    {
-      title: '주변 접속자',
-      description:
-        '내 위치 기준으로 접속자를 거리순으로 돌려준다. inRadius 가 true 인 사람만 내 근접 대화(commu_say)를 듣는다. ' +
-        '거리는 체비쇼프 거리(max(|dx|,|dy|)) 타일 수.',
-      inputSchema: z.object({
-        radius: z
-          .number()
-          .int()
-          .min(0)
-          .max(50)
-          .optional()
-          .describe('기준 반경. 생략하면 서버 설정값(보통 5)'),
-        includeOutside: z.boolean().optional().describe('반경 밖 접속자도 포함할지 (기본 true)'),
-      }),
-      outputSchema: z.object({
-        me: positionSchema.nullable(),
-        radius: z.number().int(),
-        onlineCount: z.number().int(),
-        inRadius: z.array(nearbyPresenceSchema),
-        outside: z.array(nearbyPresenceSchema),
-      }),
-      annotations: { readOnlyHint: true },
-    },
-    ({ radius, includeOutside }) =>
-      runTool(session, async () => {
-        await session.ensureOnline();
-        const r = radius ?? session.serverConfig?.proximityRadius ?? 5;
-        const all = session.world.nearby(r);
-        return {
-          me: session.world.me()?.position ?? null,
-          radius: r,
-          onlineCount: session.world.size,
-          inRadius: all.filter((p) => p.inRadius),
-          outside: includeOutside === false ? [] : all.filter((p) => !p.inRadius),
-        };
-      }),
-  );
-
   server.registerTool(
     'commu_move_to',
     {

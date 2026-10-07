@@ -3,31 +3,21 @@ import { z, ZodError } from 'zod';
 
 import { CommuApiError, describeApiError } from '../../commu/errors.js';
 import {
-  directionSchema,
   epochMs,
   positionSchema,
-  presenceStateSchema,
   userKindSchema,
   userRoleSchema,
   userStatusSchema,
   type DmMessage,
-  type GroupMemberWithUser,
   type GroupMessage,
-  type Presence,
   type PublicMessage,
   type User,
 } from '../../commu/schemas.js';
 import type { CommuSession } from '../../commu/session.js';
+import { toolResult } from '../../commu/untrusted.js';
 import { log } from '../../logger.js';
 
 /* ---------- 결과 포장 ---------- */
-
-export function toolOk(output: object): CallToolResult {
-  return {
-    content: [{ type: 'text', text: JSON.stringify(output, null, 2) }],
-    structuredContent: output as unknown as Record<string, unknown>,
-  };
-}
 
 export function toolError(error: unknown): CallToolResult {
   return { isError: true, content: [{ type: 'text', text: describeError(error) }] };
@@ -36,6 +26,7 @@ export function toolError(error: unknown): CallToolResult {
 /**
  * 도구 본문을 감싼다: 유휴 타이머 리셋(MCP.md 3.3), 예외 → isError 결과(MCP.md 7).
  * LLM 이 에러 코드·details 를 읽고 대응할 수 있게 계약 형식을 그대로 싣는다.
+ * 결과에 untrusted 가 있으면 텍스트 맨 앞에 고정 안내가 붙는다 (MCP.md 6.1, toolResult).
  */
 export async function runTool<T extends object>(
   session: CommuSession,
@@ -43,7 +34,7 @@ export async function runTool<T extends object>(
 ): Promise<CallToolResult> {
   session.touch();
   try {
-    return toolOk(await fn());
+    return toolResult(await fn());
   } catch (error) {
     log.debug('tool failed', error);
     return toolError(error);
@@ -84,33 +75,6 @@ export function compactUser(user: User): CompactUser {
   };
 }
 
-export const compactPresenceSchema = z.object({
-  userId: z.string(),
-  nickname: z.string(),
-  kind: userKindSchema,
-  x: z.number().int(),
-  y: z.number().int(),
-  dir: directionSchema,
-  state: presenceStateSchema,
-});
-
-export function compactPresence(p: Presence) {
-  return {
-    userId: p.userId,
-    nickname: p.nickname,
-    kind: p.kind,
-    x: p.position.x,
-    y: p.position.y,
-    dir: p.position.dir,
-    state: p.state,
-  };
-}
-
-export const nearbyPresenceSchema = compactPresenceSchema.extend({
-  distance: z.number().int(),
-  inRadius: z.boolean(),
-});
-
 export const compactMessageSchema = z.object({
   id: z.string(),
   kind: z.enum(['public', 'dm', 'group']),
@@ -146,24 +110,4 @@ export function compactMessage(
   }
   if (message.kind === 'group') base.groupId = message.groupId;
   return base;
-}
-
-export const compactMemberSchema = z.object({
-  userId: z.string(),
-  nickname: z.string(),
-  role: z.enum(['owner', 'member']),
-  joinedAt: epochMs,
-  lastReadMessageId: z.string().optional(),
-});
-
-export function compactMember(member: GroupMemberWithUser) {
-  return {
-    userId: member.userId,
-    nickname: member.user.nickname,
-    role: member.role,
-    joinedAt: member.joinedAt,
-    ...(member.lastReadMessageId !== undefined
-      ? { lastReadMessageId: member.lastReadMessageId }
-      : {}),
-  };
 }
