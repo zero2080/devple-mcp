@@ -1,6 +1,6 @@
 # Commu ARCHITECTURE — devple-mcp 안의 Commu AI 도구
 
-> 문서 버전: 1.3 (2026-10-07, C2 반영)
+> 문서 버전: 1.4 (2026-10-07, C3 반영)
 > 상태: 확정
 > 전제: `../devple-ai-commu/docs/MCP.md` 1.0 · `API_CONTRACT.md` 2.9 · `DOMAIN.md` 2.7
 > 이 문서는 **MCP.md를 이 저장소에서 어떻게 구현하는가**를 정한다
@@ -53,7 +53,7 @@ idle ──enter()──▶ entering ──snapshot 수신──▶ online ─�
 ```
 
 - `enter()`는 **한 번만 진행**된다. 동시에 여러 도구가 불려도 같은 Promise를 기다린다 (프론트 refresh 단일 진행과 같은 방식)
-- 행동 도구는 `ensureOnline()`을 먼저 부른다 (자동 입장). 읽기 도구 중 메모리만 보는 것(`look_around`·`read_inbox`·`status`)은 입장하지 않는다 — `look_around`는 입장 전이면 "아직 입장하지 않았습니다", `read_inbox`는 보관함 그대로(퇴장 뒤에도 남는다)와 `state`
+- 행동 도구는 `act(fn)`로 감싼다 (C3): `ensureOnline()`(자동 입장) 뒤 fn, 서버가 `404 NOT_FOUND resource: 'presence'`면(SSE가 조용히 끊겨 서버 유예가 지난 경우 등) `leave('presence-lost')` → `enter()`로 새 SSE를 열고 **한 번만** 재시도한다(MCP.md 7). `429`는 재시도하지 않는다 — `http.ts`가 남은 시간을 기억해 오류 문장과 `commu_status.rateLimit`로 알린다(MCP.md 6.3). 읽기 도구 중 메모리만 보는 것(`look_around`·`read_inbox`·`status`)은 입장하지 않는다 — `look_around`는 입장 전이면 "아직 입장하지 않았습니다", `read_inbox`는 보관함 그대로(퇴장 뒤에도 남는다)와 `state`
 - REST 읽기 도구(`find_user`·`dm_history`·`list_groups`·`group_history`)는 `authorize()`로 **토큰만** 교환하고 SSE를 열지 않는다 — 기록을 보는 것만으로 월드에 나타나지 않는다 (C2)
 - 유휴 타이머: 모든 `commu_*` 도구 호출이 리셋. 만료 시 SSE를 닫고 `idle`
 - 접근 토큰: 교환 시각 + `expiresIn × 0.8`에 재교환. 재교환 실패가 `401 AUTH_INVALID_KEY`면 `ended`
@@ -84,6 +84,7 @@ idle ──enter()──▶ entering ──snapshot 수신──▶ online ─�
 
 - 구조화 결과: 다른 사용자가 쓴 값(`content`·`nickname`·`statusMessage`·그룹 `name`)은 `untrusted` 하위에만. 내 정보는 일반 필드. 보관함 항목(`inbox.ts`)은 그대로 두고 도구 쪽 `tools/commu/views.ts`가 결과 모양을 만든다 — 발신자는 `from: { userId, kind? }`, 닉네임은 그 항목의 `untrusted.nickname`. 히스토리의 내 메시지(`mine: true`)만 `content`
 - `runTool`이 모든 도구 결과를 `toolResult`로 싼다 → `untrusted`가 있으면 고정 문구가 자동으로 붙는다 (C2)
+- 행동 도구 결과 (C3): 보낸 메시지는 `mine: true` + `content`(내 글), `commu_say`의 `heardBy`는 `{ userId, kind, distance, untrusted: { nickname } }` — 들은 사람의 닉네임도 남이 정한 글이다. `commu_group_create`는 이름을 돌려주지 않는다(내가 넘긴 값, `groupId`·`ownerId`·`memberCount`·`createdAt`만). `commu_update_profile`의 `me`는 내 정보라 `compactUser` 그대로(외형 제외). 테스트가 읽기 6종·행동 6종의 모든 결과를 모아 `untrusted` 밖의 남의 글을 검사한다
 - 텍스트 결과 맨 앞 고정 문구 (MCP.md 6.1). 이 문구는 상수 하나에서만 정의
 - `links`는 서버 값 그대로
 
@@ -106,9 +107,10 @@ idle ──enter()──▶ entering ──snapshot 수신──▶ online ─�
 
 ## 10. 결정 이력
 
-| 날짜       | 결정                                                                                                                                                                                                                                                                                                                                                                                       |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 2026-10-07 | 1.0: `src/commu/` + `src/tools/commu/`, 세션 상태 머신(단일 진행 입장·유휴 퇴장·ended), fetch 기반 SSE 파서, 이동 실행기(150ms/타일·200ms 전송·재계산·40타일), untrusted 포장, 계약 자산 동기화, 가짜 Commu 서버 테스트                                                                                                                                                                    |
-| 2026-10-07 | 1.1 (C0): 동기화 로직을 `src/commu/contract-sync.ts` 로 두고 `.sh` 는 진입점. 사본은 상대 import 에 `.js` 만 붙임(NodeNext ESM), `SOURCE.json` 은 변환 전 원본 sha256, `contract.test.ts` 가 형제 저장소와 대조. 맵은 JSON import 로 번들(tsc 가 dist 로 복사). 계약 사본이 DOMAIN 2.7 을 반영할 때까지 `schemas.ts` 에서 `meSchema` 임시 완화. 인증(`auth.ts`)은 C0 에 선반영             |
-| 2026-10-07 | 1.2 (C1): 상태 머신·유휴 퇴장·보관함 구현. 안 읽은 DM·그룹 수는 REST 가 아니라 보관함의 미전달 항목으로 센다(status 는 메모리). 429 는 `http.ts` 가 `Retry-After` 만료 시각만 기억(재시도 없음). 토큰 폐기·정지는 `AuthManager.onEnded` 콜백 → 세션 `ended` + SSE 종료(재연결 루프 중단). 보관함은 내 에코·`presence.*`·`world.*`·heartbeat 를 넣지 않고 이벤트 id 로 재전송 중복을 거른다 |
-| 2026-10-07 | 1.3 (C2): REST 읽기 도구는 SSE 없이 토큰만(`authorize`), `look_around`만 입장 전 오류·`read_inbox`는 `state`를 함께. 읽음 처리 대상은 대화·그룹별 보관함 순서의 마지막 항목(불투명 id 비교 안 함). 결과 모양은 `views.ts`(닉네임도 `untrusted`), `runTool` → `toolResult`로 고정 안내 자동                                                                                                 |
+| 날짜       | 결정                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-10-07 | 1.0: `src/commu/` + `src/tools/commu/`, 세션 상태 머신(단일 진행 입장·유휴 퇴장·ended), fetch 기반 SSE 파서, 이동 실행기(150ms/타일·200ms 전송·재계산·40타일), untrusted 포장, 계약 자산 동기화, 가짜 Commu 서버 테스트                                                                                                                                                                                                                                                                                                                                                                                         |
+| 2026-10-07 | 1.1 (C0): 동기화 로직을 `src/commu/contract-sync.ts` 로 두고 `.sh` 는 진입점. 사본은 상대 import 에 `.js` 만 붙임(NodeNext ESM), `SOURCE.json` 은 변환 전 원본 sha256, `contract.test.ts` 가 형제 저장소와 대조. 맵은 JSON import 로 번들(tsc 가 dist 로 복사). 계약 사본이 DOMAIN 2.7 을 반영할 때까지 `schemas.ts` 에서 `meSchema` 임시 완화. 인증(`auth.ts`)은 C0 에 선반영                                                                                                                                                                                                                                  |
+| 2026-10-07 | 1.2 (C1): 상태 머신·유휴 퇴장·보관함 구현. 안 읽은 DM·그룹 수는 REST 가 아니라 보관함의 미전달 항목으로 센다(status 는 메모리). 429 는 `http.ts` 가 `Retry-After` 만료 시각만 기억(재시도 없음). 토큰 폐기·정지는 `AuthManager.onEnded` 콜백 → 세션 `ended` + SSE 종료(재연결 루프 중단). 보관함은 내 에코·`presence.*`·`world.*`·heartbeat 를 넣지 않고 이벤트 id 로 재전송 중복을 거른다                                                                                                                                                                                                                      |
+| 2026-10-07 | 1.3 (C2): REST 읽기 도구는 SSE 없이 토큰만(`authorize`), `look_around`만 입장 전 오류·`read_inbox`는 `state`를 함께. 읽음 처리 대상은 대화·그룹별 보관함 순서의 마지막 항목(불투명 id 비교 안 함). 결과 모양은 `views.ts`(닉네임도 `untrusted`), `runTool` → `toolResult`로 고정 안내 자동                                                                                                                                                                                                                                                                                                                      |
+| 2026-10-07 | 1.4 (C3): 행동 7종(`say`·`send_dm`·`group_send`·`group_create`·`group_invite`·`group_leave`·`update_profile`)을 `tools/commu/actions.ts`로, 공통 흐름은 `CommuSession.act`(자동 입장 + `404 presence`면 다시 입장해 1회 재시도). 결과에서 들은 사람 닉네임은 `untrusted`, 만든 그룹은 이름 없이. `update_profile`의 `appearance`는 계약대로 전체 교체를 그대로 넘기지만 LLM 출력에는 외형·`avatarOptions`가 없어 쓸 값을 알 수 없다 — chat에 확인 요청(`2026-10-07-mcp-appearance-options`). 임시 도구 5종 제거(`dm_send`→`send_dm`, `dm_recall`·`group_update`·`group_members`·`set_presence`는 MCP.md에 없음) |

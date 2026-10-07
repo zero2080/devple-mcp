@@ -96,6 +96,7 @@ export class FakeCommu {
 
   private readonly expiredTokens = new Set<string>();
   private rateLimitOnce: number | null = null;
+  private presenceMissingOnce = false;
   private readonly tickets = new Set<string>();
   private readonly streams = new Set<http.ServerResponse>();
   /** 재전송 버퍼 (API_CONTRACT 3.1: lastEventId 이후를 snapshot 뒤에 다시 보낸다) */
@@ -168,6 +169,14 @@ export class FakeCommu {
   /** 다음 메시지 전송(공개·DM·그룹) 1건을 429 로 거부한다 */
   rateLimitNextMessage(retryAfterSec = 3): void {
     this.rateLimitOnce = retryAfterSec;
+  }
+
+  /**
+   * 다음 근접 대화 1건을 `404 presence` 로 거부한다 — SSE 가 조용히 끊겨 서버 유예가 지난 상황 (MCP.md 7: 다시 입장해 재시도).
+   * 클라이언트는 아직 연결돼 있다고 믿는다
+   */
+  losePresenceOnce(): void {
+    this.presenceMissingOnce = true;
   }
 
   /** 모든 열린 SSE 스트림에 이벤트를 쓴다 */
@@ -367,14 +376,32 @@ export class FakeCommu {
     }
     if (method === 'GET' && path === '/me') return json(200, { me: this.me, config: this.config });
     if (method === 'PATCH' && path === '/me') {
-      const b = (body ?? {}) as { nickname?: string; statusMessage?: string };
+      const b = (body ?? {}) as {
+        nickname?: string;
+        statusMessage?: string;
+        appearance?: Me['appearance'];
+      };
       if (b.nickname !== undefined) {
-        const len = [...b.nickname.trim()].length;
+        const nickname = b.nickname.trim();
+        const len = [...nickname].length;
         if (len < 2 || len > 12) {
           return fail(400, 'VALIDATION_FAILED', '닉네임 길이', { fields: { nickname: 'length' } });
         }
-        this.me.nickname = b.nickname.trim();
+        // API_CONTRACT 2.2·2.8: 400 → NICKNAME_COOLDOWN → NICKNAME_TAKEN
+        const changeableAt = this.me.nicknameChangeableAt;
+        if (changeableAt !== undefined && changeableAt > Date.now()) {
+          return fail(409, 'NICKNAME_COOLDOWN', '닉네임 변경 대기', { nextChangeAt: changeableAt });
+        }
+        const lower = nickname.toLowerCase();
+        if ([...this.others.values()].some((u) => u.nickname.toLowerCase() === lower)) {
+          return fail(409, 'NICKNAME_TAKEN', '이미 있는 닉네임');
+        }
+        if (nickname !== this.me.nickname) {
+          this.me.nickname = nickname;
+          this.me.nicknameChangeableAt = Date.now() + 24 * 60 * 60 * 1000;
+        }
       }
+      if (b.appearance !== undefined) this.me.appearance = b.appearance;
       if (b.statusMessage !== undefined) {
         if (b.statusMessage === '') delete this.me.statusMessage;
         else this.me.statusMessage = b.statusMessage;
@@ -432,8 +459,10 @@ export class FakeCommu {
     if (method === 'POST' && path === '/chat/public') {
       if (rateLimited()) return;
       const content = (body as { content?: string } | null)?.content ?? '';
-      if (this.streams.size === 0)
+      if (this.streams.size === 0 || this.presenceMissingOnce) {
+        this.presenceMissingOnce = false;
         return fail(404, 'NOT_FOUND', 'Presence 없음', { resource: 'presence' });
+      }
       if (!content.trim()) return fail(400, 'MESSAGE_INVALID_CONTENT', '내용이 비어 있어요');
       const message: PublicMessage = {
         kind: 'public',

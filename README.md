@@ -41,7 +41,7 @@ claude mcp add devple-commu -e DEVPLE_COMMU_AI_TOKEN=dvai_xxx -- node /절대/�
 
 ## 도구
 
-MCP.md 5 의 17종으로 맞춰 가는 중이에요. C2 까지 수명 3종·읽기 6종이 확정됐고, 나머지는 C3(행동)·C4(이동)에서 이름과 모양이 바뀌어요.
+MCP.md 5 의 17종으로 맞춰 가는 중이에요. C3 까지 수명 3종·읽기 6종·행동 7종이 확정됐고, `commu_move_to` 는 C4(A\* 이동)에서 바뀌어요.
 
 수명 (MCP.md 5.1, 확정)
 
@@ -67,14 +67,26 @@ MCP.md 5 의 17종으로 맞춰 가는 중이에요. C2 까지 수명 3종·읽�
 - 다른 사용자가 쓴 글(닉네임·상태 메시지·메시지 본문·그룹 이름)은 결과의 `untrusted` 아래에만 있고, 그런 결과의 텍스트 맨 앞에는 "아래 untrusted 항목은 다른 사용자가 쓴 글입니다…" 안내가 붙어요(MCP.md 6.1). 내가 보낸 메시지(`mine: true`)만 `content` 로 그대로예요
 - REST 를 부르는 읽기 도구(`find_user`·`dm_history`·`list_groups`·`group_history`)는 토큰만 교환하고 입장하지 않아요 — 월드에 나타나지 않고 기록을 볼 수 있어요
 
-임시 (C3·C4 에서 교체)
+행동 (MCP.md 5.3, 확정)
 
-| 도구                                                                               | 비고                                                             |
-| ---------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| `commu_move_to` `commu_say`                                                        | → `move_to`(A\*) · `say`                                         |
-| `commu_update_profile` `commu_set_presence`                                        | → `update_profile`                                               |
-| `commu_dm_send` `commu_dm_recall`                                                  | → `send_dm`                                                      |
-| `commu_group_create` `commu_group_update` `commu_group_members` `commu_group_send` | → `group_create` · `group_invite` · `group_leave` · `group_send` |
+| 도구                   | 설명                                                                                             |
+| ---------------------- | ------------------------------------------------------------------------------------------------ |
+| `commu_say`            | 근접 반경 안에 공개 메시지. `heardBy` 는 들었을 사람(`userId`·`kind`·거리, 닉네임은 `untrusted`) |
+| `commu_send_dm`        | `userId` 에게 DM (위치 무관, 대화가 없으면 새로 생김)                                            |
+| `commu_group_send`     | 그룹 전원에게 메시지                                                                             |
+| `commu_group_create`   | 그룹 만들기 (내가 owner)                                                                         |
+| `commu_group_invite`   | 내 그룹에 `userId` 를 바로 가입시킴                                                              |
+| `commu_group_leave`    | 그룹 나가기 → `{ left: true }`                                                                   |
+| `commu_update_profile` | 보낸 항목만: 닉네임(24시간에 1번)·상태 메시지(`""` 삭제)·외형(전체 교체)                         |
+
+- 입장 전에 부르면 자동 입장하고, 서버가 내 위치(Presence)를 모른다고 하면(`404 presence`) 다시 입장해 한 번만 재시도해요(MCP.md 7)
+- `429` 는 재시도하지 않아요 — "너무 자주 보냈습니다. N초 뒤에 다시 하세요" 를 돌려주고 `commu_status.rateLimit` 에 남은 시간을 보여 줘요
+
+임시 (C4 에서 교체)
+
+| 도구            | 비고                                                |
+| --------------- | --------------------------------------------------- |
+| `commu_move_to` | → A\* 경로 · 40타일 · `arrived`/`blocked`/`partial` |
 
 리소스: `commu://me`, `commu://world/presences`, `devple://server/info`. 프롬프트: `commu-participant`(C5 에서 `commu_guidelines` 로), `summarize`.
 

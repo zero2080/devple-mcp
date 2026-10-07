@@ -29,11 +29,11 @@ import {
 } from './schemas.js';
 import { SseClient, type SseState } from './sse.js';
 import contractMap from './contract/maps/main.json' with { type: 'json' };
-import { chebyshev, WorldState, type TilePoint } from './world.js';
+import { chebyshev, WorldState, type NearbyPresence, type TilePoint } from './world.js';
 
 /** ARCHITECTURE 3: idle → entering → online → leaving → idle. ended 는 복구 없음 */
 export type SessionState = 'idle' | 'entering' | 'online' | 'leaving' | 'ended';
-export type LeaveReason = 'tool' | 'idle' | 'shutdown';
+export type LeaveReason = 'tool' | 'idle' | 'shutdown' | 'presence-lost';
 
 export interface SessionDeps {
   fetchImpl?: typeof fetch;
@@ -88,7 +88,8 @@ export interface MoveResult {
 
 export interface SayResult {
   message: PublicMessage;
-  heardBy: string[];
+  /** 반경 안에 있어 들었을 접속자 (닉네임은 다른 사용자가 쓴 글 — 도구가 untrusted 로 감싼다) */
+  heardBy: NearbyPresence[];
 }
 
 /**
@@ -237,6 +238,23 @@ export class CommuSession {
     return { dm: dmCount, group: groupCount };
   }
 
+  /**
+   * 행동 도구의 본문 (MCP.md 3.1·7): 입장돼 있지 않으면 자동 입장하고 fn 을 부른다. 서버가
+   * `404 NOT_FOUND resource: 'presence'` 로 답하면(SSE 가 조용히 끊겨 유예가 지난 경우 등) 다시 입장해 한 번만 재시도한다
+   */
+  async act<T>(fn: () => Promise<T>): Promise<T> {
+    await this.ensureOnline();
+    try {
+      return await fn();
+    } catch (error) {
+      if (!isPresenceMissing(error)) throw error;
+      log.info('presence missing on the server — re-entering once');
+      await this.leave('presence-lost');
+      await this.enter();
+      return fn();
+    }
+  }
+
   /** 행동 도구용: 입장돼 있지 않으면 자동 입장 */
   async ensureOnline(): Promise<void> {
     if (this.online) {
@@ -375,14 +393,10 @@ export class CommuSession {
 
   /** 근접 공개 대화. 반경 안에 있어 들었을 접속자 닉네임을 함께 돌려준다 */
   async say(content: string): Promise<SayResult> {
-    await this.ensureOnline();
-    const message = await this.client.sendPublic(content);
+    const message = await this.act(() => this.client.sendPublic(content));
     const radius = this.serverConfig?.proximityRadius ?? 5;
     this.world.setMyPosition(message.position, this.clock.now());
-    const heardBy = this.world
-      .nearby(radius, message.position)
-      .filter((p) => p.inRadius)
-      .map((p) => p.nickname);
+    const heardBy = this.world.nearby(radius, message.position).filter((p) => p.inRadius);
     return { message, heardBy };
   }
 
@@ -553,4 +567,13 @@ function loadContractMap(): MapGrid | null {
     log.warn('contract map could not be loaded; moving without pathfinding', error);
     return null;
   }
+}
+
+/** MCP.md 7: 입장(Presence)이 서버에 없다는 응답 — 행동 도구는 다시 입장해 한 번 재시도한다 */
+function isPresenceMissing(error: unknown): boolean {
+  return (
+    error instanceof CommuApiError &&
+    error.code === 'NOT_FOUND' &&
+    error.details?.['resource'] === 'presence'
+  );
 }

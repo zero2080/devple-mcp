@@ -118,7 +118,7 @@ describe('CommuSession (MCP.md 3 수명 · 4 보관함, 가짜 Commu 서버)', (
 
     const { heardBy } = await session.say('다시 왔어요');
     expect(session.state).toBe('online');
-    expect(heardBy).toEqual(['도트']);
+    expect(heardBy.map((p) => p.nickname)).toEqual(['도트']);
     expect(fake.exchangeCount).toBe(exchanges);
     expect(paths('/sse').length).toBe(sse + 1);
   });
