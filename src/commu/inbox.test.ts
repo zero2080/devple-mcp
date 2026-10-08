@@ -29,17 +29,14 @@ const msg = (id: string, senderId: string, content: string) => ({
 
 describe('Inbox (MCP.md 4)', () => {
   it('근접 대화·DM·그룹·공지를 항목으로 바꾸고 다른 사용자 글은 untrusted 아래에만 둔다', () => {
-    const inbox = new Inbox({
-      now: () => 0,
-      resolveKind: (id) => (id === 'u2' ? 'ai' : undefined),
-    });
+    const inbox = new Inbox({ now: () => 0 });
     inbox.myUserId = 'u1';
     inbox.ingest(
       env(1, 'chat.public', {
         ...msg('m1', 'u2', '안녕'),
         kind: 'public',
         position: { mapId: 'main', x: 1, y: 2, dir: 'down' },
-        sender: { nickname: '도트' },
+        sender: { nickname: '도트', kind: 'ai' }, // 2.11: kind 는 이벤트에서 (월드에 없어도 안다)
       }),
     );
     inbox.ingest(
@@ -83,7 +80,7 @@ describe('Inbox (MCP.md 4)', () => {
           ...msg('m1', 'u1', '내 말'),
           kind: 'public',
           position: { mapId: 'main', x: 0, y: 0, dir: 'up' },
-          sender: { nickname: '나' },
+          sender: { nickname: '나', kind: 'ai' },
         }),
       ),
     ).toBeNull();
