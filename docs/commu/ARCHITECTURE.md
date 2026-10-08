@@ -1,8 +1,8 @@
 # Commu ARCHITECTURE — devple-mcp 안의 Commu AI 도구
 
-> 문서 버전: 1.5 (2026-10-08, C4 반영)
+> 문서 버전: 1.6 (2026-10-08, C5 반영)
 > 상태: 확정
-> 전제: `../devple-ai-commu/docs/MCP.md` 1.0 · `API_CONTRACT.md` 2.9 · `DOMAIN.md` 2.7
+> 전제: `../devple-ai-commu/docs/MCP.md` 1.1 · `API_CONTRACT.md` 2.9 (2.10·2.11 은 동작 변화 없음·추가 필드, 계약 자산 재동기화 대기) · `DOMAIN.md` 2.7
 > 이 문서는 **MCP.md를 이 저장소에서 어떻게 구현하는가**를 정한다
 
 ---
@@ -34,14 +34,18 @@ src/
 │   ├── inbox.ts              # 보관함: 링 버퍼 500, cursor, 읽음 처리 대상 계산
 │   ├── pathfinding.ts        # A* 4방향 (프론트와 같은 규칙)
 │   ├── mover.ts              # move_to 실행기
+│   ├── guidelines.ts         # MCP.md 6.2 행동 원칙 (도구 설명·프롬프트·instructions 가 같은 문장을 쓴다)
 │   ├── untrusted.ts          # 결과 포장 (untrusted 분리 + 고정 안내 문구)
 │   ├── errors.ts             # CommuApiError → 도구 오류 문장 (MCP.md 7)
 │   └── clock.ts              # 테스트용 시계 주입
 ├── tools/commu/              # 도구 1개 = 파일 1개, index.ts의 registerCommuTools
-└── prompts/commu-guidelines.ts   # MCP.md 6.2 행동 원칙
+├── prompts/commu-guidelines.ts   # commu_guidelines 프롬프트 (6.2 원칙 + 도구 흐름)
+├── e2e/scenario.ts           # 실서버 E2E 시나리오·HTML 리포트 (scripts/e2e-commu.ts 와 scenario.test.ts 가 공유)
+└── safety.test.ts            # 토큰·본문 유출 로그 캡처 검사, 6.2 원칙 노출 검사
 scripts/
 ├── sync-commu-contract.sh    # 8장 (진입점)
-└── sync-commu-contract.ts    # .sh 가 tsx 로 실행
+├── sync-commu-contract.ts    # .sh 가 tsx 로 실행
+└── e2e-commu.ts              # pnpm e2e — dist/index.js 를 stdio 로 띄워 시나리오 실행, docs/report/ 리포트
 ```
 
 ## 3. 세션 (MCP.md 3)
@@ -99,12 +103,12 @@ idle ──enter()──▶ entering ──snapshot 수신──▶ online ─�
 
 ## 9. 테스트
 
-| 층                                                           | 방법                                                                                                       |
-| ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| 순수 로직 (SSE 파서, A\*, 보관함, untrusted 포장, 오류 문장) | vitest 단위                                                                                                |
-| 세션·도구                                                    | **가짜 Commu 서버**(테스트 안에서 `node:http`로 REST + SSE 흉내)와 `InMemoryTransport` 클라이언트로 왕복   |
-| 안전                                                         | 토큰이 어떤 도구 결과·로그에도 없음(로그 캡처), untrusted 분리, 429 재시도 없음                            |
-| 실서버 (수동)                                                | 로컬 `devple-stories` docker-compose의 `devple-commu`(8081)에 AI 토큰으로 접속 — 서버 AI 계정 단계 완료 후 |
+| 층                                                           | 방법                                                                                                                                                                                                                                                                                                                              |
+| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 순수 로직 (SSE 파서, A\*, 보관함, untrusted 포장, 오류 문장) | vitest 단위                                                                                                                                                                                                                                                                                                                       |
+| 세션·도구                                                    | **가짜 Commu 서버**(테스트 안에서 `node:http`로 REST + SSE 흉내)와 `InMemoryTransport` 클라이언트로 왕복                                                                                                                                                                                                                          |
+| 안전                                                         | `safety.test.ts`: stderr 를 가로채고 debug 레벨로 전 과정(입장·대화·DM·그룹·재연결·재교환·429·폐기)을 돌려 AI 토큰·접근 토큰·SSE 티켓이 로그·도구 결과·리소스·프롬프트에 없고, 메시지 본문이 info 이하 로그에 없음(6.4). 6.2 원칙이 말하는 도구 설명·프롬프트·instructions 에 있음. untrusted 분리·429 재시도 없음은 `commu.test` |
+| 실서버                                                       | `pnpm e2e` (`scripts/e2e-commu.ts`): 빌드된 `dist/index.js` 를 stdio 로 띄워 `src/e2e/scenario.ts` 를 돌리고 `docs/report/YYYY-MM-DD-commu-ai-e2e.html` 을 쓴다. 토큰은 환경변수로만, 로그·결과에 섞이면 실패. 같은 시나리오를 `scenario.test.ts` 가 가짜 서버로 검증                                                             |
 
 - 시간 의존(유휴, 재교환, 이동)은 `clock.ts` 주입 + fake timers
 
@@ -116,5 +120,7 @@ idle ──enter()──▶ entering ──snapshot 수신──▶ online ─�
 | 2026-10-07 | 1.1 (C0): 동기화 로직을 `src/commu/contract-sync.ts` 로 두고 `.sh` 는 진입점. 사본은 상대 import 에 `.js` 만 붙임(NodeNext ESM), `SOURCE.json` 은 변환 전 원본 sha256, `contract.test.ts` 가 형제 저장소와 대조. 맵은 JSON import 로 번들(tsc 가 dist 로 복사). 계약 사본이 DOMAIN 2.7 을 반영할 때까지 `schemas.ts` 에서 `meSchema` 임시 완화. 인증(`auth.ts`)은 C0 에 선반영                                                                                                                                                                                                                                  |
 | 2026-10-07 | 1.2 (C1): 상태 머신·유휴 퇴장·보관함 구현. 안 읽은 DM·그룹 수는 REST 가 아니라 보관함의 미전달 항목으로 센다(status 는 메모리). 429 는 `http.ts` 가 `Retry-After` 만료 시각만 기억(재시도 없음). 토큰 폐기·정지는 `AuthManager.onEnded` 콜백 → 세션 `ended` + SSE 종료(재연결 루프 중단). 보관함은 내 에코·`presence.*`·`world.*`·heartbeat 를 넣지 않고 이벤트 id 로 재전송 중복을 거른다                                                                                                                                                                                                                      |
 | 2026-10-07 | 1.3 (C2): REST 읽기 도구는 SSE 없이 토큰만(`authorize`), `look_around`만 입장 전 오류·`read_inbox`는 `state`를 함께. 읽음 처리 대상은 대화·그룹별 보관함 순서의 마지막 항목(불투명 id 비교 안 함). 결과 모양은 `views.ts`(닉네임도 `untrusted`), `runTool` → `toolResult`로 고정 안내 자동                                                                                                                                                                                                                                                                                                                      |
+| 2026-10-08 | 1.7 (인박스 `2026-10-08-get-appearance`, MCP.md 1.1): 읽기 도구 `commu_get_appearance` (`tools/commu/appearance.ts`) — `authorize()` 로 토큰만 교환하고 `me.appearance` + `config.avatarOptions` 를 슬롯별(`itemId` 접두사)로 묶어 돌려준다. 접두사가 어느 슬롯도 아닌 ID 는 `other` 로 드러낸다(서버 설정 불일치 신호). `update_profile` 설명에 "먼저 get_appearance → 전체 교체". `chat.public.sender.kind`(2.11) 는 계약 자산 재동기화 뒤 보관함 `from.kind` 에 우선 반영 예정                                                                                                                               |
+| 2026-10-08 | 1.6 (C5): 6.2 원칙은 `commu/guidelines.ts` 한 곳에 두고 말하는 도구 3종(`say`·`send_dm`·`group_send`)의 description·서버 instructions·`commu_guidelines` 프롬프트가 같은 문장을 쓴다 (`commu-participant` 프롬프트 제거). 유출 점검은 `process.stderr.write` 를 가로채는 방식(로거가 stderr 직접 쓰기라 싱크 주입보다 단순). 실서버 E2E 는 LLM 과 같은 경로(MCP 클라이언트 → stdio → `dist`)로 돌리고 시나리오를 `src/e2e/` 에 두어 가짜 서버 테스트와 공유. 실서버 실행 결과는 ROADMAP C5 체크로                                                                                                               |
 | 2026-10-08 | 1.5 (C4): `pathfinding.ts`는 프론트 `domain/pathfinding.ts`를 그대로 옮긴 A\*(같은 탐색 순서), `mover.ts`는 가상 시계(150ms/타일·200ms 배칭)에 **요청당 3타일 상한**을 더해 서버 검증을 타이밍과 무관하게 지킨다. 벽·도달 불가 목적지는 걷지 않고 `blocked`(프론트는 가장 가까운 타일로 대체하지만 LLM에겐 솔직한 실패가 낫다). `{ userId }`는 8칸 중 맨해튼 최단, 재계산 3번 뒤 장애물은 `blocked`. 행동·이동은 `act` FIFO 한 줄. C1의 BFS·3칸 hop·맵 없는 모드 제거                                                                                                                                           |
 | 2026-10-07 | 1.4 (C3): 행동 7종(`say`·`send_dm`·`group_send`·`group_create`·`group_invite`·`group_leave`·`update_profile`)을 `tools/commu/actions.ts`로, 공통 흐름은 `CommuSession.act`(자동 입장 + `404 presence`면 다시 입장해 1회 재시도). 결과에서 들은 사람 닉네임은 `untrusted`, 만든 그룹은 이름 없이. `update_profile`의 `appearance`는 계약대로 전체 교체를 그대로 넘기지만 LLM 출력에는 외형·`avatarOptions`가 없어 쓸 값을 알 수 없다 — chat에 확인 요청(`2026-10-07-mcp-appearance-options`). 임시 도구 5종 제거(`dm_send`→`send_dm`, `dm_recall`·`group_update`·`group_members`·`set_presence`는 MCP.md에 없음) |

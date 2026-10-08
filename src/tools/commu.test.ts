@@ -9,7 +9,7 @@ import { FakeCommu, TEST_AI_TOKEN, waitUntil } from '../test/fake-commu.js';
 type Structured = Record<string, unknown>;
 type ToolResult = Awaited<ReturnType<Client['callTool']>>;
 
-/** C2 읽기 도구 (MCP.md 5.1·5.2) */
+/** C2 읽기 도구 (MCP.md 5.1·5.2) + 외형 조회 (MCP.md 1.1) */
 const READ_TOOLS = [
   'commu_look_around',
   'commu_find_user',
@@ -17,6 +17,7 @@ const READ_TOOLS = [
   'commu_dm_history',
   'commu_list_groups',
   'commu_group_history',
+  'commu_get_appearance',
 ];
 
 /** C3 행동 도구 7종 + C4 이동 (MCP.md 5.3) */
@@ -113,7 +114,7 @@ describe('commu_* 도구 (MCP 클라이언트 → 서버 → 가짜 Commu)', () 
     await close();
   });
 
-  it('수명 3종·읽기 6종·행동 8종(이동 포함) = 17종이 있고, 바뀐 임시 도구는 없다', async () => {
+  it('수명 3종·읽기 7종(외형 조회 포함)·행동 8종(이동 포함) = 18종이 있고, 바뀐 임시 도구는 없다', async () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name);
     expect(names).toEqual(
@@ -175,6 +176,48 @@ describe('commu_* 도구 (MCP 클라이언트 → 서버 → 가짜 Commu)', () 
     const online = await call('commu_status');
     expect(online.data).toMatchObject({ state: 'online', sse: 'open', idle: { minutes: 10 } });
     expect((online.data['idle'] as Structured)['leaveInSec']).toBeGreaterThan(500);
+  });
+
+  it('commu_get_appearance 는 입장(SSE) 없이 토큰만 교환해 현재 외형과 슬롯별 선택지를 준다 (MCP.md 1.1)', async () => {
+    // 공용 세션은 이미 입장했으므로 별도 세션으로 '입장 없이' 를 본다
+    const own = new CommuSession(config(), { move: { tileMs: 0, batchMs: 0 } });
+    const server = createServer({ session: own });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    const c = new Client({ name: 'appearance-test', version: '0.0.0' });
+    await Promise.all([server.connect(st), c.connect(ct)]);
+    const ask = async () => {
+      const result = await c.callTool({ name: 'commu_get_appearance', arguments: {} });
+      readResults.push({ name: 'commu_get_appearance', result });
+      return { result, data: (result.structuredContent ?? {}) as Structured };
+    };
+    const before = fake.exchangeCount;
+    const streams = fake.streamCount;
+    const look = await ask();
+    expect(look.result.isError, textOf(look.result)).toBeFalsy();
+    expect(look.data['current']).toEqual(own.me?.appearance);
+    expect(look.data['options']).toEqual({
+      slots: {
+        hair: ['hair_short'],
+        hat: ['hat_beanie'],
+        face: [],
+        top: ['top_tee', 'top_hoodie'],
+        bottom: ['bottom_jeans'],
+        shoes: ['shoes_sneakers'],
+        hand: [],
+      },
+      requiredSlots: ['top', 'bottom', 'shoes'],
+      skinRampIds: ['skin_01'],
+      hairRampIds: ['hair_01'],
+      itemRampIds: ['ramp_01'],
+    });
+    expect(fake.exchangeCount).toBe(before + 1);
+    expect(fake.streamCount).toBe(streams); // 이 세션은 SSE 를 열지 않았다
+    expect(own.status()).toMatchObject({ state: 'idle' });
+    expect((await ask()).result.isError).toBeFalsy();
+    expect(fake.exchangeCount).toBe(before + 1); // 두 번째는 교환하지 않는다
+    await c.close();
+    await server.close();
+    await own.leave('shutdown');
   });
 
   it('commu_look_around 는 반경 안 사람만 kind 와 함께, 닉네임·들은 말은 untrusted 로 준다', async () => {
@@ -502,6 +545,14 @@ describe('commu_* 도구 (MCP 클라이언트 → 서버 → 가짜 Commu)', () 
     });
     expect(changed.data['me']).not.toHaveProperty('appearance'); // LLM 출력에서는 뺀다 (compactUser)
 
+    // 외형은 commu_get_appearance 로 본 뒤 바꿀 슬롯만 고친 전체 값을 보낸다 — 바꾼 뒤에도 같은 도구가 새 외형을 준다
+    const current = (await call('commu_get_appearance')).data['current'] as Record<string, unknown>;
+    const restyled = { ...current, hat: { itemId: 'hat_beanie' }, top: { itemId: 'top_hoodie' } };
+    expect(
+      (await call('commu_update_profile', { appearance: restyled })).result.isError,
+    ).toBeFalsy();
+    expect((await call('commu_get_appearance')).data['current']).toEqual(restyled);
+
     const taken = await call('commu_update_profile', { nickname: '도트' });
     expect(textOf(taken.result)).toMatch(/^이미 쓰는 닉네임입니다\n\{"code":"NICKNAME_TAKEN"/);
     const renamed = await call('commu_update_profile', { nickname: '새봇이' });
@@ -561,10 +612,12 @@ describe('commu_* 도구 (MCP 클라이언트 → 서버 → 가짜 Commu)', () 
       '멀리',
     ]);
     const prompt = await client.getPrompt({
-      name: 'commu-participant',
+      name: 'commu_guidelines',
       arguments: { goal: '인사하기' },
     });
     expect((prompt.messages[0]?.content as { text: string }).text).toContain('인사하기');
+    const { prompts } = await client.listPrompts();
+    expect(prompts.map((p) => p.name)).not.toContain('commu-participant');
   });
 
   it('보관함이 넘치면 오래된 것부터 버리고 commu_read_inbox 가 dropped 를 알린다', async () => {
