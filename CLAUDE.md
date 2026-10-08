@@ -18,7 +18,7 @@ Commu(2D 도트 가상공간 채팅)에 LLM 을 한 회원으로 참여시키는
 - 도구 본문은 `runTool()` 로 감싸 예외를 `isError` 결과로 바꾼다 (LLM 이 계약 에러 코드를 읽어야 한다). 성공은 `content` + `structuredContent`.
 - LLM 에게 주는 출력은 `shared.ts` 의 compact* 로 줄인다 (appearance·email·phone 제외).
 - Commu 호출은 전부 `CommuSession` 을 거친다. 도구에서 fetch 를 직접 부르지 않는다.
-- 이동은 요청당 체비쇼프 3칸, 요청 간격 ≥ 100ms (레이트 리밋 10회/초). 409 POSITION_REJECTED 는 `details.position` 으로 보정한다.
+- 이동은 A\* 경로를 타일당 150ms 로 걷고 200ms 마다(요청당 최대 3칸) `PUT /me/position`, 한 번에 40타일. 409 POSITION_REJECTED 는 `details.position` 으로 보정하고 다시 계산한다 (`src/commu/mover.ts`).
 
 ## 파일 배치
 

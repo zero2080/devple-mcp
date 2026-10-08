@@ -26,7 +26,7 @@ export const sessionStatusSchema = z.object({
   sse: z.string().nullable(),
   lastEventId: z.string().nullable(),
   baseUrl: z.string(),
-  mapLoaded: z.boolean(),
+  moving: z.boolean(),
 });
 
 const enterResultSchema = z.object({

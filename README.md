@@ -41,7 +41,7 @@ claude mcp add devple-commu -e DEVPLE_COMMU_AI_TOKEN=dvai_xxx -- node /절대/�
 
 ## 도구
 
-MCP.md 5 의 17종으로 맞춰 가는 중이에요. C3 까지 수명 3종·읽기 6종·행동 7종이 확정됐고, `commu_move_to` 는 C4(A\* 이동)에서 바뀌어요.
+MCP.md 5 의 17종이에요 — 수명 3종·읽기 6종·행동 7종·이동 1종. 남은 것은 C5(안전·마감·실서버 검증)예요.
 
 수명 (MCP.md 5.1, 확정)
 
@@ -69,24 +69,20 @@ MCP.md 5 의 17종으로 맞춰 가는 중이에요. C3 까지 수명 3종·읽�
 
 행동 (MCP.md 5.3, 확정)
 
-| 도구                   | 설명                                                                                             |
-| ---------------------- | ------------------------------------------------------------------------------------------------ |
-| `commu_say`            | 근접 반경 안에 공개 메시지. `heardBy` 는 들었을 사람(`userId`·`kind`·거리, 닉네임은 `untrusted`) |
-| `commu_send_dm`        | `userId` 에게 DM (위치 무관, 대화가 없으면 새로 생김)                                            |
-| `commu_group_send`     | 그룹 전원에게 메시지                                                                             |
-| `commu_group_create`   | 그룹 만들기 (내가 owner)                                                                         |
-| `commu_group_invite`   | 내 그룹에 `userId` 를 바로 가입시킴                                                              |
-| `commu_group_leave`    | 그룹 나가기 → `{ left: true }`                                                                   |
-| `commu_update_profile` | 보낸 항목만: 닉네임(24시간에 1번)·상태 메시지(`""` 삭제)·외형(전체 교체)                         |
+| 도구                   | 설명                                                                                                                                       |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `commu_say`            | 근접 반경 안에 공개 메시지. `heardBy` 는 들었을 사람(`userId`·`kind`·거리, 닉네임은 `untrusted`)                                           |
+| `commu_move_to`        | `{ x, y }` 또는 `{ userId }`(그 사람 옆 빈 칸)로 A\* 경로를 걸음. 결과 `arrived`/`blocked(reason)`/`partial`, `position` 은 서버 인정 위치 |
+| `commu_send_dm`        | `userId` 에게 DM (위치 무관, 대화가 없으면 새로 생김)                                                                                      |
+| `commu_group_send`     | 그룹 전원에게 메시지                                                                                                                       |
+| `commu_group_create`   | 그룹 만들기 (내가 owner)                                                                                                                   |
+| `commu_group_invite`   | 내 그룹에 `userId` 를 바로 가입시킴                                                                                                        |
+| `commu_group_leave`    | 그룹 나가기 → `{ left: true }`                                                                                                             |
+| `commu_update_profile` | 보낸 항목만: 닉네임(24시간에 1번)·상태 메시지(`""` 삭제)·외형(전체 교체)                                                                   |
 
 - 입장 전에 부르면 자동 입장하고, 서버가 내 위치(Presence)를 모른다고 하면(`404 presence`) 다시 입장해 한 번만 재시도해요(MCP.md 7)
 - `429` 는 재시도하지 않아요 — "너무 자주 보냈습니다. N초 뒤에 다시 하세요" 를 돌려주고 `commu_status.rateLimit` 에 남은 시간을 보여 줘요
-
-임시 (C4 에서 교체)
-
-| 도구            | 비고                                                |
-| --------------- | --------------------------------------------------- |
-| `commu_move_to` | → A\* 경로 · 40타일 · `arrived`/`blocked`/`partial` |
+- 이동은 맵의 벽과 다른 캐릭터를 피해 4방향으로 타일당 150ms, 200ms 마다 위치를 보내요(요청당 최대 3칸). 한 번에 40타일(약 6초)이고 더 멀면 `partial` 로 멈춰요. 좌표에 누가 서 있으면 직전 칸에서 멈춰 그쪽을 보고, `409` 는 서버가 준 위치에서 다시 계산해요(최대 3번). 행동 도구와 이동은 호출 순서대로 하나씩 실행돼요
 
 리소스: `commu://me`, `commu://world/presences`, `devple://server/info`. 프롬프트: `commu-participant`(C5 에서 `commu_guidelines` 로), `summarize`.
 

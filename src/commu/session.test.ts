@@ -36,11 +36,20 @@ describe('CommuSession (MCP.md 3 수명 · 4 보관함, 가짜 Commu 서버)', (
   const sessions: CommuSession[] = [];
 
   const newSession = (deps: ConstructorParameters<typeof CommuSession>[1] = {}) => {
-    const session = new CommuSession(config, { hopIntervalMs: 0, map: null, ...deps });
+    const session = new CommuSession(config, {
+      move: { tileMs: 0, batchMs: 0 },
+      map: openGrid(),
+      ...deps,
+    });
     sessions.push(session);
     return session;
   };
   const paths = (p: string) => fake.calls.filter((c) => c.path === p);
+  const positionBodies = (since: number) =>
+    fake.calls
+      .slice(since)
+      .filter((c) => c.method === 'PUT' && c.path === '/me/position')
+      .map((c) => c.body as { x: number; y: number; dir: string; seq: number });
 
   beforeAll(async () => {
     await fake.start();
@@ -183,44 +192,121 @@ describe('CommuSession (MCP.md 3 수명 · 4 보관함, 가짜 Commu 서버)', (
     expect(session.inbox.recentPublic()).toEqual([]); // 내 발화는 보관하지 않는다
   });
 
-  it('맵 없이 직선 이동: 3칸씩 끊어 가고, 점유된 타일은 서버 409 로 멈춘다', async () => {
+  it('moveTo: A* 경로로 걸어 도착하고, 요청마다 3칸 이내·seq 증가, 점유된 목적지는 직전 칸에서 그쪽을 본다', async () => {
     const session = newSession();
     await session.enter();
+    const since = fake.calls.length;
     const result = await session.moveTo({ x: 20, y: 24 });
     expect(result).toMatchObject({
-      reached: true,
-      hops: 3,
+      status: 'arrived',
+      tilesMoved: 9,
+      remainingTiles: 0,
+      rejections: 0,
       position: { x: 20, y: 24, dir: 'down' },
     });
-    const blocked = await session.moveTo({ x: 23, y: 15 });
-    expect(blocked).toMatchObject({
-      reached: false,
-      hops: 2,
-      stoppedBecause: 'occupied',
-      position: { x: 23, y: 18 },
+    expect(session.status().position).toEqual({ mapId: 'main', x: 20, y: 24, dir: 'down' });
+    const bodies = positionBodies(since);
+    expect(bodies).toHaveLength(result.requests);
+    for (let i = 1; i < bodies.length; i++)
+      expect(bodies[i]!.seq).toBeGreaterThan(bodies[i - 1]!.seq);
+
+    const beside = await session.moveTo({ x: 23, y: 15 }); // u2 가 서 있다
+    expect(beside).toMatchObject({
+      status: 'arrived',
+      goal: { x: 22, y: 15 },
+      position: { x: 22, y: 15, dir: 'right' },
+      remainingTiles: 0,
     });
-    expect(blocked.rejections).toEqual([{ x: 23, y: 15, reason: 'occupied' }]);
+    expect(session.status().moving).toBe(false);
   });
 
-  it('맵이 있으면 경로를 찾고, 점유된 목적지는 직전 타일에서 멈춘다', async () => {
-    const session = newSession({ map: openGrid() });
+  it('moveTo({ userId }): 그 사람 옆 빈 칸으로 가서 바라본다. 이미 옆이면 요청 없이 arrived, 없는 사람·오프라인·나 자신은 오류', async () => {
+    const session = newSession();
     await session.enter();
-    const result = await session.moveTo({ x: 23, y: 15 });
+    const result = await session.moveTo({ userId: 'u2' });
     expect(result).toMatchObject({
-      reached: false,
-      distanceToTarget: 1,
-      rejections: [],
-      position: { x: 22, y: 15 },
-      pathLength: 2,
+      status: 'arrived',
+      goal: { x: 22, y: 15 },
+      position: { x: 22, y: 15, dir: 'right' },
+      user: { userId: 'u2', distance: 1, withinProximity: true },
     });
+    const since = fake.calls.length;
+    expect(await session.moveTo({ userId: 'u2' })).toMatchObject({
+      status: 'arrived',
+      requests: 0,
+    });
+    expect(positionBodies(since)).toHaveLength(0);
+    await expect(session.moveTo({ userId: 'nobody' })).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+      details: { resource: 'user' },
+    });
+    expect(await session.moveTo({ userId: 'u4' })).toMatchObject({
+      status: 'blocked',
+      reason: 'user_offline',
+      requests: 0,
+    });
+    await expect(session.moveTo({ userId: 'u1' })).rejects.toThrow(/자기 자신/);
+  });
+
+  it('moveTo: 벽 목적지는 blocked(collision), 월드가 모르는 끼어든 사람은 409 occupied 로 돌아가고, 재계산을 다 쓰면 blocked', async () => {
     const wall = openGrid();
     wall.collision[15 * 40 + 25] = 1;
-    const session2 = newSession({ map: wall });
-    await session2.enter();
-    expect(await session2.moveTo({ x: 25, y: 15 })).toMatchObject({
-      stoppedBecause: 'collision',
-      hops: 0,
+    const walled = newSession({ map: wall });
+    await walled.enter();
+    expect(await walled.moveTo({ x: 25, y: 15 })).toMatchObject({
+      status: 'blocked',
+      reason: 'collision',
+      requests: 0,
     });
+    await walled.leave();
+
+    const session = newSession();
+    await session.enter();
+    fake.others.set('u6', {
+      id: 'u6',
+      nickname: '끼어듦',
+      online: true,
+      position: { x: 20, y: 18 },
+    });
+    try {
+      const result = await session.moveTo({ x: 20, y: 21 });
+      expect(result).toMatchObject({
+        status: 'arrived',
+        position: { x: 20, y: 21 },
+        rejections: 1,
+        replans: 1,
+      });
+    } finally {
+      fake.others.delete('u6');
+    }
+    fake.rejectPositions('too_far', 4);
+    expect(await session.moveTo({ x: 20, y: 15 })).toMatchObject({
+      status: 'blocked',
+      reason: 'too_far',
+      rejections: 4,
+      replans: 3,
+      tilesMoved: 0,
+      position: { x: 20, y: 21 },
+    });
+  });
+
+  it('이동 중에는 다른 행동 도구가 끝날 때까지 기다리고(status.moving), 이동끼리는 차례로 간다', async () => {
+    const session = newSession();
+    await session.enter();
+    const since = fake.calls.length;
+    const move = session.moveTo({ x: 20, y: 20 });
+    expect(session.status().moving).toBe(true);
+    const say = session.say('가는 중');
+    const next = session.moveTo({ x: 22, y: 20 });
+    const [moved, said, moved2] = await Promise.all([move, say, next]);
+    expect(moved).toMatchObject({ status: 'arrived', position: { x: 20, y: 20 } });
+    expect(moved2).toMatchObject({ status: 'arrived', position: { x: 22, y: 20 } });
+    expect(said.message.position).toEqual({ mapId: 'main', x: 20, y: 20, dir: 'down' });
+    const order = fake.calls.slice(since).map((c) => `${c.method} ${c.path}`);
+    const firstSay = order.indexOf('POST /chat/public');
+    const lastBeforeSay = order.slice(0, firstSay).filter((o) => o === 'PUT /me/position');
+    expect(lastBeforeSay).toHaveLength(moved.requests);
+    expect(session.status().moving).toBe(false);
   });
 
   it('접근 토큰은 expiresIn 의 80% 가 지나면 다시 교환하고, 401 AUTH_REQUIRED 면 한 번 재교환한다', async () => {
@@ -261,13 +347,10 @@ describe('CommuSession (MCP.md 3 수명 · 4 보관함, 가짜 Commu 서버)', (
   });
 
   it('토큰이 없으면 disabled, 틀리면 revoked 로 끝난다', async () => {
-    const disabled = new CommuSession(
-      { ...config, enabled: false, aiToken: undefined },
-      { map: null },
-    );
+    const disabled = new CommuSession({ ...config, enabled: false, aiToken: undefined });
     await expect(disabled.enter()).rejects.toThrow(/토큰이 설정되지 않았습니다/);
     expect(disabled.status().state).toBe('idle');
-    const wrong = new CommuSession({ ...config, aiToken: 'dvai_wrong' }, { map: null });
+    const wrong = new CommuSession({ ...config, aiToken: 'dvai_wrong' });
     await expect(wrong.enter()).rejects.toMatchObject({ reason: 'revoked' });
     expect(wrong.state).toBe('ended');
   });

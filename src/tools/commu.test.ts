@@ -19,9 +19,10 @@ const READ_TOOLS = [
   'commu_group_history',
 ];
 
-/** C3 행동 도구 (MCP.md 5.3). commu_move_to 는 C4 */
+/** C3 행동 도구 7종 + C4 이동 (MCP.md 5.3) */
 const ACTION_TOOLS = [
   'commu_say',
+  'commu_move_to',
   'commu_send_dm',
   'commu_group_send',
   'commu_group_create',
@@ -95,7 +96,7 @@ describe('commu_* 도구 (MCP 클라이언트 → 서버 → 가짜 Commu)', () 
 
   beforeAll(async () => {
     await fake.start();
-    session = new CommuSession(config(), { hopIntervalMs: 0, map: null });
+    session = new CommuSession(config(), { move: { tileMs: 0, batchMs: 0 } });
     const server = createServer({ session });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     client = new Client({ name: 'commu-tools-test', version: '0.0.0' });
@@ -112,7 +113,7 @@ describe('commu_* 도구 (MCP 클라이언트 → 서버 → 가짜 Commu)', () 
     await close();
   });
 
-  it('수명 3종·읽기 6종·행동 7종이 있고, 바뀐 임시 도구는 없다', async () => {
+  it('수명 3종·읽기 6종·행동 8종(이동 포함) = 17종이 있고, 바뀐 임시 도구는 없다', async () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name);
     expect(names).toEqual(
@@ -308,9 +309,32 @@ describe('commu_* 도구 (MCP 클라이언트 → 서버 → 가짜 Commu)', () 
     expect((await call('commu_status')).data).toMatchObject({ unread: { dm: 0, group: 0 } });
   });
 
-  it('commu_move_to', async () => {
+  it('commu_move_to: 계약 맵에서 좌표로, 사람 옆으로(user.withinProximity), 입력은 x·y 또는 userId 하나만', async () => {
     const move = await call('commu_move_to', { x: 20, y: 21 });
-    expect(move.data).toMatchObject({ reached: true, hops: 2, position: { x: 20, y: 21 } });
+    expect(move.data).toMatchObject({
+      status: 'arrived',
+      tilesMoved: 6,
+      remainingTiles: 0,
+      position: { x: 20, y: 21, dir: 'down' },
+    });
+    // 봇은 (21,16). (20,21) 에서 가장 가까운 옆 칸은 대각선 (20,17) — 도착 뒤 봇 쪽(up)을 본다
+    const toBot = await call('commu_move_to', { userId: 'u4' });
+    expect(toBot.data).toMatchObject({
+      status: 'arrived',
+      goal: { x: 20, y: 17 },
+      position: { x: 20, y: 17, dir: 'up' },
+      user: { userId: 'u4', distance: 1, withinProximity: true },
+    });
+    expect((await call('commu_status')).data).toMatchObject({
+      position: { x: 20, y: 17 },
+      moving: false,
+    });
+    for (const bad of [{}, { x: 1 }, { x: 1, y: 1, userId: 'u2' }]) {
+      const result = await client
+        .callTool({ name: 'commu_move_to', arguments: bad })
+        .catch((error: unknown) => ({ isError: true, content: [], error }));
+      expect(result.isError, JSON.stringify(bad)).toBe(true);
+    }
   });
 
   it('계약 에러는 MCP.md 7 문장 + 계약 JSON 으로 돌아온다', async () => {
@@ -442,12 +466,13 @@ describe('commu_* 도구 (MCP 클라이언트 → 서버 → 가짜 Commu)', () 
     });
   });
 
-  it('행동 7종은 입장 전에 불러도 자동 입장한 뒤 수행한다 (MCP.md 3.1)', async () => {
+  it('행동 8종은 입장 전에 불러도 자동 입장한 뒤 수행한다 (MCP.md 3.1)', async () => {
     const { groupId } = (await call('commu_group_create', { name: '입장 모임' })).data['group'] as {
       groupId: string;
     };
     const cases: [string, Record<string, unknown>][] = [
       ['commu_say', { content: '왔어요' }],
+      ['commu_move_to', { x: 20, y: 17 }],
       ['commu_send_dm', { userId: 'u2', content: '왔어요' }],
       ['commu_group_send', { groupId, content: '왔어요' }],
       ['commu_group_create', { name: '새 모임' }],
@@ -506,10 +531,7 @@ describe('commu_* 도구 (MCP 클라이언트 → 서버 → 가짜 Commu)', () 
   });
 
   it('토큰이 없으면 서버는 뜨고 commu_* 도구는 안내 오류를 돌려준다 (MCP.md 2)', async () => {
-    const disabled = new CommuSession(
-      { ...config(), enabled: false, aiToken: undefined },
-      { map: null },
-    );
+    const disabled = new CommuSession({ ...config(), enabled: false, aiToken: undefined });
     const server = createServer({ session: disabled });
     const [ct, st] = InMemoryTransport.createLinkedPair();
     const c = new Client({ name: 'disabled-test', version: '0.0.0' });
@@ -546,7 +568,7 @@ describe('commu_* 도구 (MCP 클라이언트 → 서버 → 가짜 Commu)', () 
   });
 
   it('보관함이 넘치면 오래된 것부터 버리고 commu_read_inbox 가 dropped 를 알린다', async () => {
-    const small = new CommuSession(config(), { hopIntervalMs: 0, map: null, inboxCapacity: 2 });
+    const small = new CommuSession(config(), { move: { tileMs: 0, batchMs: 0 }, inboxCapacity: 2 });
     const server = createServer({ session: small });
     const [ct, st] = InMemoryTransport.createLinkedPair();
     const c = new Client({ name: 'small-inbox-test', version: '0.0.0' });
