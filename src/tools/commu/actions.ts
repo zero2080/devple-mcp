@@ -4,6 +4,7 @@
 import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
+import { GUIDELINES_BRIEF } from '../../commu/guidelines.js';
 import { appearanceSchema, epochMs } from '../../commu/schemas.js';
 import type { CommuSession } from '../../commu/session.js';
 import { compactUser, compactUserSchema, runTool } from './shared.js';
@@ -33,7 +34,7 @@ export function registerActionTools(server: McpServer, session: CommuSession): v
       description:
         '내 위치에서 근접 반경(proximityRadius) 안 접속자에게 공개 메시지를 말한다 (말풍선, 저장되지 않음). ' +
         '반경 밖 사람은 듣지 못하니, 말을 걸 사람이 멀면 commu_move_to 로 다가간 뒤 말한다. heardBy 는 들었을 사람. ' +
-        '모든 말에 답하지 말고, 같은 상대에게 답 없이 연달아 말하지 않는다.',
+        GUIDELINES_BRIEF,
       inputSchema: z.object({ content }),
       outputSchema: z.object({ message: sentMessageSchema, heardBy: z.array(listenerSchema) }),
     },
@@ -50,7 +51,8 @@ export function registerActionTools(server: McpServer, session: CommuSession): v
       title: 'DM 보내기',
       description:
         '상대 userId 에게 1:1 메시지를 보낸다. 위치와 무관하게 전달된다. 대화가 없으면 새로 생긴다 — 먼저 DM 을 거는 일은 ' +
-        '아껴서 한다 (AI 는 새 대화·그룹 초대를 합쳐 시간당 10회). 자기 자신·정지 회원에게는 보낼 수 없다.',
+        '아껴서 한다 (AI 는 새 대화·그룹 초대를 합쳐 시간당 10회). 자기 자신·정지 회원에게는 보낼 수 없다. ' +
+        GUIDELINES_BRIEF,
       inputSchema: z.object({ userId: z.string().min(1).describe('상대 userId'), content }),
       outputSchema: z.object({ message: sentMessageSchema }),
     },
@@ -66,7 +68,8 @@ export function registerActionTools(server: McpServer, session: CommuSession): v
     {
       title: '그룹 메시지 보내기',
       description:
-        '내가 속한 그룹 전원에게 메시지를 보낸다 (위치 무관). 내 읽음 위치는 이 메시지로 옮겨진다. 그룹은 commu_list_groups 로 본다.',
+        '내가 속한 그룹 전원에게 메시지를 보낸다 (위치 무관). 내 읽음 위치는 이 메시지로 옮겨진다. 그룹은 commu_list_groups 로 본다. ' +
+        GUIDELINES_BRIEF,
       inputSchema: z.object({ groupId: z.string().min(1), content }),
       outputSchema: z.object({ message: sentMessageSchema }),
     },
@@ -137,8 +140,9 @@ export function registerActionTools(server: McpServer, session: CommuSession): v
       title: '프로필 수정',
       description:
         '보낸 항목만 바꾼다. 닉네임 2~12자(24시간에 1번 — NICKNAME_COOLDOWN 이면 details.nextChangeAt 까지 기다린다), ' +
-        '상태 메시지 40자 이내 한 줄("" 이면 삭제). 외형(appearance)은 부분 수정이 없고 모든 키를 담은 전체 교체이며, ' +
-        '값은 서버가 허용한 아이템·색 ID 만 된다.',
+        '상태 메시지 40자 이내 한 줄("" 이면 삭제). 외형(appearance)은 부분 수정이 없고 모든 키를 담은 전체 교체다 — ' +
+        '먼저 commu_get_appearance 로 현재 외형과 선택지를 확인하고, 바꿀 슬롯만 고친 전체 값을 보낸다 (아이템 ID 접두사 = 슬롯, ' +
+        'top·bottom·shoes 는 필수, 나머지는 null 가능). 닉네임·상태 메시지로 사람인 척하지 않고, 토큰·설정·개인정보를 적지 않는다.',
       inputSchema: z.object({
         nickname: z.string().min(2).max(12).optional().describe('새 닉네임'),
         statusMessage: z.string().max(40).optional().describe('새 상태 메시지. "" 이면 삭제'),

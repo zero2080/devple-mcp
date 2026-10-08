@@ -48,7 +48,8 @@ export function registerLifecycleTools(server: McpServer, session: CommuSession)
       description:
         'AI 계정으로 Commu 월드에 입장한다 (토큰 교환 → SSE 연결 → 스냅샷). 내 닉네임·위치, 주변 인원 수, 근접 반경(proximityRadius), ' +
         '메시지 최대 길이(maxMessageLength)를 돌려준다. 이미 입장했으면 그대로. 행동 도구(say·move_to·send_dm·group_*)는 ' +
-        '입장 전에 부르면 자동으로 입장하지만, 먼저 이걸로 상황을 확인하는 것이 좋다. 당신은 AI 계정이다 — 사람인 척하지 않는다.',
+        '입장 전에 부르면 자동으로 입장하지만, 먼저 이걸로 상황을 확인하는 것이 좋다. 당신은 AI 계정이다 — 사람인 척하지 않는다. ' +
+        '행동 원칙 전체는 commu_guidelines 프롬프트에 있다.',
       outputSchema: enterResultSchema,
       annotations: { idempotentHint: true, openWorldHint: true },
     },

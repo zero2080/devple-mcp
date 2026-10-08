@@ -25,6 +25,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "inspect": "pnpm dlx @modelcontextprotocol/inspector tsx src/index.ts",
+    "e2e": "tsx scripts/e2e-commu.ts",
     "contract:sync": "scripts/sync-commu-contract.sh",
     "contract:check": "scripts/sync-commu-contract.sh --check"
   },

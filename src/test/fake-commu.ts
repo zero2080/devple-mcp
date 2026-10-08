@@ -39,7 +39,14 @@ export const defaultConfig: ServerConfig = {
   defaultMapId: 'main',
   maxGroupMembers: 10,
   avatarOptions: {
-    itemIds: ['top_tee', 'bottom_jeans', 'shoes_sneakers'],
+    itemIds: [
+      'top_tee',
+      'top_hoodie',
+      'bottom_jeans',
+      'shoes_sneakers',
+      'hat_beanie',
+      'hair_short',
+    ],
     skinRampIds: ['skin_01'],
     hairRampIds: ['hair_01'],
     itemRampIds: ['ramp_01'],

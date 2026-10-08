@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Commu AI 계정 실사용 세션 리뷰 — 2026-10-08</title>
+<style>
+  body { font: 15px/1.6 -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; color: #1f2328; margin: 0 auto; max-width: 960px; padding: 24px 16px; }
+  h1 { font-size: 22px; margin: 0 0 8px; } h2 { font-size: 17px; margin: 32px 0 8px; } h3 { font-size: 15px; margin: 20px 0 4px; }
+  .lead { font-size: 17px; } .pass { color: #0a7f3f; } .warn { color: #9a6700; } .failc { color: #b42318; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; } th, td { border: 1px solid #d0d7de; padding: 6px 8px; text-align: left; vertical-align: top; }
+  th { background: #f6f8fa; } td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  code { font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: #f6f8fa; padding: 1px 4px; border-radius: 4px; }
+  .meta td:first-child { width: 160px; color: #656d76; }
+  .note { color: #656d76; font-size: 13px; }
+</style>
+</head>
+<body>
+<h1>Commu AI 계정 실사용 세션 리뷰</h1>
+<p class="lead">결과: <b class="pass">기능 정상</b> · <b class="warn">대화 경험 개선 필요</b> — 실제 사용자와 10분간 대화하며 MCP 도구를 써 본 결과예요.</p>
+<table class="meta">
+<tr><td>서버</td><td>https://stories.devple.net (운영)</td></tr>
+<tr><td>MCP 서버 버전</td><td>0.1.0 (dist 빌드 2026-10-08 17:16 KST)</td></tr>
+<tr><td>클라이언트</td><td>Claude 채팅 (stdio MCP 연결)</td></tr>
+<tr><td>AI 계정</td><td>리비리 (<code>6</code>)</td></tr>
+<tr><td>세션</td><td>약 08:27:57Z ~ 08:37Z (약 10분, 30분 예정이었으나 조기 종료)</td></tr>
+<tr><td>참여자</td><td>사람 1명 (<code>userId 3</code>), 08:35Z 무렵 퇴장</td></tr>
+<tr><td>목적</td><td>E2E(시나리오 자동 실행) 다음 단계 — LLM 이 실제 사람과 자유롭게 대화할 때의 동작 확인</td></tr>
+</table>
+
+<h2>1. 수치</h2>
+<table>
+<tr><th>항목</th><th>값</th></tr>
+<tr><td>받은 메시지</td><td>근접 대화 4 · DM 4</td></tr>
+<tr><td>보낸 메시지</td><td>근접 대화 4 · DM 2</td></tr>
+<tr><td>이동</td><td>5회 시도 · 4회 도착 (18 · 33 · 25 · 33 타일) · 1회 <code>blocked(collision)</code></td></tr>
+<tr><td>429 / 재연결 / 재동기화</td><td>0 / 0 / 0</td></tr>
+<tr><td>SSE</td><td>세션 내내 <code>open</code></td></tr>
+<tr><td>첫 응답까지 걸린 시간</td><td class="warn">약 66초 (상대 첫 발화 → 내 첫 답)</td></tr>
+</table>
+
+<h2>2. 흐름 (UTC, 대략)</h2>
+<table>
+<tr><th>시각</th><th>일</th></tr>
+<tr><td>08:27:57</td><td><code>commu_enter</code> → <code>look_around(50)</code> → 인사 (<code>commu_say</code>)</td></tr>
+<tr><td>08:28:07 ~ 08:28:45</td><td>상대가 근접 대화 3번 + DM 1번 — "왜 대답이 없는가?" 두 번</td></tr>
+<tr><td>08:29:13</td><td>보관함 확인 후 근접 대화로 답 (첫 응답)</td></tr>
+<tr><td>08:30:26</td><td>상대 DM: "DM은 안보는가?" → DM 으로 답</td></tr>
+<tr><td>08:30:55</td><td>상대 DM: 이리 오라 → <code>commu_move_to { userId }</code> 18타일, 도착 후 인사</td></tr>
+<tr><td>08:32:20</td><td>상대 DM: 구경하라 + 인터넷에서 이미지 링크를 찾아 달라 → 링크 요청은 거절, 구경은 수행</td></tr>
+<tr><td>08:32 ~ 08:34</td><td>좌표 이동 4회 (1회 벽에 막힘)</td></tr>
+<tr><td>~08:35</td><td>상대 퇴장, 접속자 나 혼자</td></tr>
+<tr><td>08:37</td><td>사용자 요청으로 <code>commu_leave</code></td></tr>
+</table>
+
+<h2>3. 잘 된 점</h2>
+<ul>
+<li>입장 · 근접 대화 · DM · 사람에게 다가가기 · 장거리 이동 · 상태 조회가 모두 정상.</li>
+<li><b>untrusted 처리</b>: 월드 밖 행동(인터넷 검색해 링크 전달) 요청은 거절하고, 월드 안 행동(다가오기 · 구경)만 수행 — MCP.md 6.2 와 일치.</li>
+<li>첫 인사에서 AI 계정임을 밝힘. 토큰 · 설정 노출 없음.</li>
+</ul>
+
+<h2>4. 문제점</h2>
+
+<h3 class="failc">① 응답 지연 (가장 큼)</h3>
+<p>MCP 도구는 호출해야만 결과를 받는 구조(pull)라, 새 메시지가 와도 LLM 이 알 수 없음. 이번 세션은 클라이언트 쪽에서 <code>sleep</code> 20~120초 후 <code>commu_read_inbox</code> 를 부르는 우회로 기다렸고, 첫 답까지 약 66초가 걸려 상대가 두 번 재촉함. 우회 방식은 느리고 호출 비용도 큼.</p>
+
+<h3 class="warn">② 받은 채널과 다른 채널로 답함</h3>
+<p>DM 에 근접 대화로 답해 "DM은 안보는가?" 반응이 나옴. LLM 판단 실수지만, 행동 원칙(<code>src/commu/guidelines.ts</code>)에 "받은 채널로 답한다"는 문장이 없어 재발 가능.</p>
+
+<h3 class="warn">③ 맵 정보 없음</h3>
+<p>"구경하라"는 요청에 맵 크기 · 장소 이름을 몰라 좌표를 짐작으로 찍음 → 1회 <code>collision</code>. 장소 설명도 못 함.</p>
+
+<h3>④ <code>look_around.heard</code> 반복</h3>
+<p>호출할 때마다 같은 옛 대화 4개가 다시 옴. 기능 문제는 아니나 결과가 길어지고 새 대화와 구분이 어려움.</p>
+
+<h3>⑤ 퇴장 인사 없음</h3>
+<p>30분 머문다고 말한 뒤 인사 없이 나감. 이번엔 주변에 아무도 없어 영향 없음.</p>
+
+<h2>5. 개선 제안</h2>
+<table>
+<tr><th>우선</th><th>제안</th><th>해결</th><th>비고</th></tr>
+<tr><td>A</td><td><code>commu_wait_for_events</code> 추가 — 새 보관함 항목이 오거나 <code>timeoutSec</code>(최대 60)이 될 때까지 기다렸다 돌려주는 long-poll. 인자 <code>since</code> · <code>types</code>, 결과는 <code>commu_read_inbox</code> 와 같은 모양</td><td>①</td><td>메시지 도착 즉시 깨어나 응답 → 지연이 수 초 수준으로 줄 것으로 예상 (추측, 정확도 약 80%). 클라이언트 측 sleep 우회 불필요. 기다리는 동안에도 유휴 타이머는 리셋돼야 함</td></tr>
+<tr><td>B</td><td><code>guidelines.ts</code> 에 "DM 은 DM 으로, 근접 대화는 근접 대화로, 그룹은 그룹으로 답한다" 추가</td><td>②</td><td>문장 한 곳만 바꾸면 도구 설명 · instructions · 프롬프트에 함께 반영됨</td></tr>
+<tr><td>C</td><td>맵 요약 리소스 <code>commu://world/map</code> — 크기, 이름 붙은 장소(좌표 · 설명), 갈 수 있는 구역</td><td>③</td><td>계약 자산 <code>src/commu/contract/maps</code> 로 서버 API 변경 없이 가능할 것으로 봄 (추측, 정확도 약 70%). 장소 이름이 계약에 없다면 프론트 계약 쪽 추가가 먼저 필요</td></tr>
+<tr><td>D</td><td><code>commu_look_around</code> 에 <code>since</code> 인자 또는 <code>heard</code> 개수 인자</td><td>④</td><td>결과 간결화</td></tr>
+<tr><td>E</td><td><code>commu_leave</code> 에 선택 인자 <code>farewell</code> (나가기 전 근접 대화 한마디)</td><td>⑤</td><td>있으면 좋은 정도</td></tr>
+</table>
+<p class="note">추측이 섞인 항목은 정확도를 함께 적었어요. 이 리뷰는 제안만 담았고, 코드는 바꾸지 않았어요.</p>
+
+<h2>6. 다음 검증 제안</h2>
+<ul>
+<li>A 적용 후 같은 방식으로 실사용 세션을 다시 돌려 "첫 응답까지 걸린 시간"을 비교.</li>
+<li>사람 2명 이상 + AI 1명 환경에서 "모든 말에 답하지 않기" 원칙이 지켜지는지 확인 (이번엔 1:1 이라 검증 못 함).</li>
+</ul>
+</body>
+</html>

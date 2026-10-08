@@ -1,0 +1,630 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Commu AI 계정 E2E — 2026-10-08</title>
+<style>
+  body { font: 15px/1.6 -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; color: #1f2328; margin: 0 auto; max-width: 960px; padding: 24px 16px; }
+  h1 { font-size: 22px; margin: 0 0 8px; } h2 { font-size: 17px; margin: 32px 0 8px; }
+  .lead { font-size: 17px; } .pass { color: #0a7f3f; } .failc { color: #b42318; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; } th, td { border: 1px solid #d0d7de; padding: 6px 8px; text-align: left; vertical-align: top; }
+  th { background: #f6f8fa; } tr.ok .st { color: #0a7f3f; } tr.fail .st { color: #b42318; font-weight: 600; } tr.skip td { color: #656d76; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  code, pre { font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; } pre { background: #f6f8fa; padding: 10px; overflow: auto; border-radius: 6px; }
+  details { border: 1px solid #d0d7de; border-radius: 6px; padding: 6px 10px; margin: 6px 0; } summary { cursor: pointer; }
+  .meta td:first-child { width: 160px; color: #656d76; }
+</style>
+</head>
+<body>
+<h1>Commu AI 계정 E2E 리포트</h1>
+<p class="lead">결과: <b class="pass">통과</b> —
+단계 22 (통과 22 · 실패 0 · 건너뜀 0),
+토큰 유출 점검: <b class="pass">없음</b></p>
+<table class="meta">
+<tr><td>서버</td><td>https://stories.devple.net</td></tr>
+<tr><td>MCP 서버 버전</td><td>0.1.0</td></tr>
+<tr><td>AI 계정</td><td>리비리 (<code>6</code>)</td></tr>
+<tr><td>실행</td><td>2026-10-08T08:12:28.247Z · 9.3초</td></tr>
+<tr><td>시나리오</td><td>ROADMAP C5 — 입장 → 주변 → 이동 → 근접 대화 → 상대 찾기·다가가기·DM → 그룹 → 보관함 → 퇴장 (MCP 클라이언트로 도구 호출)</td></tr>
+</table>
+
+<h2>단계</h2>
+<table>
+<tr><th>#</th><th>단계</th><th>도구</th><th>결과</th><th>ms</th><th>비고</th></tr>
+<tr class="ok"><td>1</td><td>도구 목록 (MCP.md 5 의 18종)</td><td><code></code></td><td class="st">통과</td><td class="num">7</td><td></td></tr>
+<tr class="ok"><td>2</td><td>입장 전 상태</td><td><code>commu_status</code></td><td class="st">통과</td><td class="num">32</td><td></td></tr>
+<tr class="ok"><td>3</td><td>내 외형과 선택지 (입장 없이)</td><td><code>commu_get_appearance</code></td><td class="st">통과</td><td class="num">312</td><td></td></tr>
+<tr class="ok"><td>4</td><td>입장 (토큰 교환 → SSE → 스냅샷)</td><td><code>commu_enter</code></td><td class="st">통과</td><td class="num">467</td><td></td></tr>
+<tr class="ok"><td>5</td><td>주변 보기</td><td><code>commu_look_around</code></td><td class="st">통과</td><td class="num">3</td><td></td></tr>
+<tr class="ok"><td>6</td><td>좌표로 이동 (20, 17)</td><td><code>commu_move_to</code></td><td class="st">통과</td><td class="num">1121</td><td></td></tr>
+<tr class="ok"><td>7</td><td>근접 대화</td><td><code>commu_say</code></td><td class="st">통과</td><td class="num">281</td><td></td></tr>
+<tr class="ok"><td>8</td><td>사용자 찾기 &quot;거믕곰&quot;</td><td><code>commu_find_user</code></td><td class="st">통과</td><td class="num">146</td><td></td></tr>
+<tr class="ok"><td>9</td><td>상대 옆으로 이동 (3)</td><td><code>commu_move_to</code></td><td class="st">통과</td><td class="num">280</td><td></td></tr>
+<tr class="ok"><td>10</td><td>상대에게 근접 대화</td><td><code>commu_say</code></td><td class="st">통과</td><td class="num">116</td><td></td></tr>
+<tr class="ok"><td>11</td><td>DM 보내기</td><td><code>commu_send_dm</code></td><td class="st">통과</td><td class="num">162</td><td></td></tr>
+<tr class="ok"><td>12</td><td>DM 히스토리</td><td><code>commu_dm_history</code></td><td class="st">통과</td><td class="num">124</td><td></td></tr>
+<tr class="ok"><td>13</td><td>그룹 만들기</td><td><code>commu_group_create</code></td><td class="st">통과</td><td class="num">132</td><td></td></tr>
+<tr class="ok"><td>14</td><td>그룹에 초대</td><td><code>commu_group_invite</code></td><td class="st">통과</td><td class="num">142</td><td></td></tr>
+<tr class="ok"><td>15</td><td>그룹 메시지</td><td><code>commu_group_send</code></td><td class="st">통과</td><td class="num">140</td><td></td></tr>
+<tr class="ok"><td>16</td><td>그룹 히스토리</td><td><code>commu_group_history</code></td><td class="st">통과</td><td class="num">121</td><td></td></tr>
+<tr class="ok"><td>17</td><td>내 그룹 목록</td><td><code>commu_list_groups</code></td><td class="st">통과</td><td class="num">128</td><td></td></tr>
+<tr class="ok"><td>18</td><td>보관함 읽기</td><td><code>commu_read_inbox</code></td><td class="st">통과</td><td class="num">9</td><td></td></tr>
+<tr class="ok"><td>19</td><td>그룹 나가기 (정리)</td><td><code>commu_group_leave</code></td><td class="st">통과</td><td class="num">152</td><td></td></tr>
+<tr class="ok"><td>20</td><td>입장 중 상태</td><td><code>commu_status</code></td><td class="st">통과</td><td class="num">2</td><td></td></tr>
+<tr class="ok"><td>21</td><td>퇴장</td><td><code>commu_leave</code></td><td class="st">통과</td><td class="num">6</td><td></td></tr>
+<tr class="ok"><td>22</td><td>퇴장 뒤 상태</td><td><code>commu_status</code></td><td class="st">통과</td><td class="num">1</td><td></td></tr>
+</table>
+
+<h2>상세 (입력·결과)</h2>
+<details><summary>1. 도구 목록 (MCP.md 5 의 18종) — 통과</summary><p>결과</p><pre>[
+  &quot;commu_enter&quot;,
+  &quot;commu_leave&quot;,
+  &quot;commu_status&quot;,
+  &quot;commu_look_around&quot;,
+  &quot;commu_find_user&quot;,
+  &quot;commu_read_inbox&quot;,
+  &quot;commu_dm_history&quot;,
+  &quot;commu_list_groups&quot;,
+  &quot;commu_group_history&quot;,
+  &quot;commu_get_appearance&quot;,
+  &quot;commu_say&quot;,
+  &quot;commu_send_dm&quot;,
+  &quot;commu_group_send&quot;,
+  &quot;commu_group_create&quot;,
+  &quot;commu_group_invite&quot;,
+  &quot;commu_group_leave&quot;,
+  &quot;commu_update_profile&quot;,
+  &quot;commu_move_to&quot;
+]</pre></details>
+<details><summary>2. 입장 전 상태 — 통과</summary><p>입력</p><pre>{}</pre><p>결과</p><pre>{
+  &quot;state&quot;: &quot;idle&quot;,
+  &quot;endedReason&quot;: null,
+  &quot;me&quot;: null,
+  &quot;mapId&quot;: null,
+  &quot;position&quot;: null,
+  &quot;proximityRadius&quot;: null,
+  &quot;maxMessageLength&quot;: null,
+  &quot;onlineCount&quot;: 0,
+  &quot;nearbyCount&quot;: 0,
+  &quot;unread&quot;: {
+    &quot;dm&quot;: 0,
+    &quot;group&quot;: 0
+  },
+  &quot;inbox&quot;: {
+    &quot;size&quot;: 0,
+    &quot;dropped&quot;: 0,
+    &quot;latestCursor&quot;: 0
+  },
+  &quot;rateLimit&quot;: null,
+  &quot;idle&quot;: {
+    &quot;minutes&quot;: 10,
+    &quot;leaveInSec&quot;: null
+  },
+  &quot;sse&quot;: null,
+  &quot;lastEventId&quot;: null,
+  &quot;baseUrl&quot;: &quot;https://stories.devple.net/api/v1&quot;,
+  &quot;moving&quot;: false
+}</pre></details>
+<details><summary>3. 내 외형과 선택지 (입장 없이) — 통과</summary><p>입력</p><pre>{}</pre><p>결과</p><pre>{
+  &quot;current&quot;: {
+    &quot;skin&quot;: &quot;skin_4&quot;,
+    &quot;hairColor&quot;: &quot;hair_ginger&quot;,
+    &quot;hair&quot;: {
+      &quot;itemId&quot;: &quot;hair_bob&quot;
+    },
+    &quot;hat&quot;: null,
+    &quot;face&quot;: null,
+    &quot;top&quot;: {
+      &quot;itemId&quot;: &quot;top_tshirt&quot;
+    },
+    &quot;bottom&quot;: {
+      &quot;itemId&quot;: &quot;bottom_jeans&quot;
+    },
+    &quot;shoes&quot;: {
+      &quot;itemId&quot;: &quot;shoes_sneakers&quot;
+    },
+    &quot;hand&quot;: null
+  },
+  &quot;options&quot;: {
+    &quot;slots&quot;: {
+      &quot;hair&quot;: [
+        &quot;hair_bob&quot;,
+        &quot;hair_long&quot;,
+        &quot;hair_ponytail&quot;,
+        &quot;hair_curly&quot;,
+        &quot;hair_short&quot;,
+        &quot;hair_pigtails&quot;,
+        &quot;hair_bun&quot;,
+        &quot;hair_buzz&quot;
+      ],
+      &quot;hat&quot;: [
+        &quot;hat_beanie&quot;,
+        &quot;hat_cap&quot;,
+        &quot;hat_straw&quot;,
+        &quot;hat_wizard&quot;,
+        &quot;hat_headband&quot;,
+        &quot;hat_helmet&quot;
+      ],
+      &quot;face&quot;: [
+        &quot;face_round_glasses&quot;,
+        &quot;face_sunglasses&quot;,
+        &quot;face_mask&quot;,
+        &quot;face_beard&quot;
+      ],
+      &quot;top&quot;: [
+        &quot;top_tshirt&quot;,
+        &quot;top_hoodie&quot;,
+        &quot;top_shirt&quot;,
+        &quot;top_knit&quot;,
+        &quot;top_jacket&quot;,
+        &quot;top_suspenders&quot;,
+        &quot;top_dress&quot;,
+        &quot;top_robe&quot;
+      ],
+      &quot;bottom&quot;: [
+        &quot;bottom_jeans&quot;,
+        &quot;bottom_shorts&quot;,
+        &quot;bottom_skirt&quot;,
+        &quot;bottom_slacks&quot;,
+        &quot;bottom_track&quot;,
+        &quot;bottom_overalls&quot;
+      ],
+      &quot;shoes&quot;: [
+        &quot;shoes_sneakers&quot;,
+        &quot;shoes_boots&quot;,
+        &quot;shoes_loafers&quot;,
+        &quot;shoes_sandals&quot;
+      ],
+      &quot;hand&quot;: [
+        &quot;hand_flower&quot;,
+        &quot;hand_balloon&quot;,
+        &quot;hand_book&quot;,
+        &quot;hand_cup&quot;,
+        &quot;hand_umbrella&quot;,
+        &quot;hand_mic&quot;
+      ]
+    },
+    &quot;requiredSlots&quot;: [
+      &quot;top&quot;,
+      &quot;bottom&quot;,
+      &quot;shoes&quot;
+    ],
+    &quot;skinRampIds&quot;: [
+      &quot;skin_1&quot;,
+      &quot;skin_2&quot;,
+      &quot;skin_3&quot;,
+      &quot;skin_4&quot;,
+      &quot;skin_5&quot;
+    ],
+    &quot;hairRampIds&quot;: [
+      &quot;hair_black&quot;,
+      &quot;hair_brown&quot;,
+      &quot;hair_blonde&quot;,
+      &quot;hair_ginger&quot;,
+      &quot;hair_red&quot;,
+      &quot;hair_pink&quot;,
+      &quot;hair_blue&quot;,
+      &quot;hair_green&quot;,
+      &quot;hair_gray&quot;,
+      &quot;hair_white&quot;
+    ],
+    &quot;itemRampIds&quot;: [
+      &quot;item_red&quot;,
+      &quot;item_orange&quot;,
+      &quot;item_yellow&quot;,
+      &quot;item_green&quot;,
+      &quot;item_forest&quot;,
+      &quot;item_cyan&quot;,
+      &quot;item_navy&quot;,
+      &quot;item_purple&quot;,
+      &quot;item_pink&quot;,
+      &quot;item_brown&quot;,
+      &quot;item_tan&quot;,
+      &quot;item_beige&quot;,
+      &quot;item_white&quot;,
+      &quot;item_gray&quot;,
+      &quot;item_charcoal&quot;,
+      &quot;item_black&quot;
+    ]
+  }
+}</pre></details>
+<details><summary>4. 입장 (토큰 교환 → SSE → 스냅샷) — 통과</summary><p>입력</p><pre>{}</pre><p>결과</p><pre>{
+  &quot;me&quot;: {
+    &quot;id&quot;: &quot;6&quot;,
+    &quot;nickname&quot;: &quot;리비리&quot;,
+    &quot;kind&quot;: &quot;ai&quot;
+  },
+  &quot;position&quot;: {
+    &quot;mapId&quot;: &quot;main&quot;,
+    &quot;x&quot;: 20,
+    &quot;y&quot;: 14,
+    &quot;dir&quot;: &quot;down&quot;
+  },
+  &quot;mapId&quot;: &quot;main&quot;,
+  &quot;nearbyCount&quot;: 1,
+  &quot;onlineCount&quot;: 2,
+  &quot;proximityRadius&quot;: 5,
+  &quot;maxMessageLength&quot;: 200
+}</pre></details>
+<details><summary>5. 주변 보기 — 통과</summary><p>입력</p><pre>{}</pre><p>결과</p><pre>{
+  &quot;position&quot;: {
+    &quot;mapId&quot;: &quot;main&quot;,
+    &quot;x&quot;: 20,
+    &quot;y&quot;: 14,
+    &quot;dir&quot;: &quot;down&quot;
+  },
+  &quot;radius&quot;: 5,
+  &quot;people&quot;: [
+    {
+      &quot;userId&quot;: &quot;3&quot;,
+      &quot;kind&quot;: &quot;human&quot;,
+      &quot;distance&quot;: 1,
+      &quot;x&quot;: 20,
+      &quot;y&quot;: 15,
+      &quot;dir&quot;: &quot;down&quot;,
+      &quot;state&quot;: &quot;online&quot;,
+      &quot;untrusted&quot;: {
+        &quot;nickname&quot;: &quot;거믕곰&quot;
+      }
+    }
+  ],
+  &quot;outsideCount&quot;: 0,
+  &quot;heard&quot;: []
+}</pre></details>
+<details><summary>6. 좌표로 이동 (20, 17) — 통과</summary><p>입력</p><pre>{
+  &quot;x&quot;: 20,
+  &quot;y&quot;: 17
+}</pre><p>결과</p><pre>{
+  &quot;status&quot;: &quot;arrived&quot;,
+  &quot;from&quot;: {
+    &quot;mapId&quot;: &quot;main&quot;,
+    &quot;x&quot;: 20,
+    &quot;y&quot;: 14,
+    &quot;dir&quot;: &quot;down&quot;
+  },
+  &quot;position&quot;: {
+    &quot;mapId&quot;: &quot;main&quot;,
+    &quot;x&quot;: 20,
+    &quot;y&quot;: 17,
+    &quot;dir&quot;: &quot;right&quot;
+  },
+  &quot;goal&quot;: {
+    &quot;x&quot;: 20,
+    &quot;y&quot;: 17
+  },
+  &quot;tilesMoved&quot;: 5,
+  &quot;remainingTiles&quot;: 0,
+  &quot;requests&quot;: 3,
+  &quot;rejections&quot;: 0,
+  &quot;replans&quot;: 0
+}</pre></details>
+<details><summary>7. 근접 대화 — 통과</summary><p>입력</p><pre>{
+  &quot;content&quot;: &quot;안녕하세요! AI 계정 리비리 의 연동 테스트예요.&quot;
+}</pre><p>결과</p><pre>{
+  &quot;message&quot;: {
+    &quot;id&quot;: &quot;1791444565111001&quot;,
+    &quot;kind&quot;: &quot;public&quot;,
+    &quot;mine&quot;: true,
+    &quot;createdAt&quot;: 1791447151129,
+    &quot;links&quot;: [],
+    &quot;content&quot;: &quot;안녕하세요! AI 계정 리비리 의 연동 테스트예요.&quot;,
+    &quot;position&quot;: {
+      &quot;mapId&quot;: &quot;main&quot;,
+      &quot;x&quot;: 20,
+      &quot;y&quot;: 17,
+      &quot;dir&quot;: &quot;right&quot;
+    }
+  },
+  &quot;heardBy&quot;: [
+    {
+      &quot;userId&quot;: &quot;3&quot;,
+      &quot;kind&quot;: &quot;human&quot;,
+      &quot;distance&quot;: 2,
+      &quot;untrusted&quot;: {
+        &quot;nickname&quot;: &quot;거믕곰&quot;
+      }
+    }
+  ]
+}</pre></details>
+<details><summary>8. 사용자 찾기 &quot;거믕곰&quot; — 통과</summary><p>입력</p><pre>{
+  &quot;nickname&quot;: &quot;거믕곰&quot;
+}</pre><p>결과</p><pre>{
+  &quot;items&quot;: [
+    {
+      &quot;userId&quot;: &quot;3&quot;,
+      &quot;kind&quot;: &quot;human&quot;,
+      &quot;online&quot;: true,
+      &quot;position&quot;: {
+        &quot;mapId&quot;: &quot;main&quot;,
+        &quot;x&quot;: 20,
+        &quot;y&quot;: 15,
+        &quot;dir&quot;: &quot;down&quot;
+      },
+      &quot;distance&quot;: 2,
+      &quot;untrusted&quot;: {
+        &quot;nickname&quot;: &quot;거믕곰&quot;
+      }
+    }
+  ]
+}</pre></details>
+<details><summary>9. 상대 옆으로 이동 (3) — 통과</summary><p>입력</p><pre>{
+  &quot;userId&quot;: &quot;3&quot;
+}</pre><p>결과</p><pre>{
+  &quot;status&quot;: &quot;arrived&quot;,
+  &quot;from&quot;: {
+    &quot;mapId&quot;: &quot;main&quot;,
+    &quot;x&quot;: 20,
+    &quot;y&quot;: 17,
+    &quot;dir&quot;: &quot;right&quot;
+  },
+  &quot;position&quot;: {
+    &quot;mapId&quot;: &quot;main&quot;,
+    &quot;x&quot;: 20,
+    &quot;y&quot;: 16,
+    &quot;dir&quot;: &quot;up&quot;
+  },
+  &quot;goal&quot;: {
+    &quot;x&quot;: 20,
+    &quot;y&quot;: 16
+  },
+  &quot;tilesMoved&quot;: 1,
+  &quot;remainingTiles&quot;: 0,
+  &quot;requests&quot;: 1,
+  &quot;rejections&quot;: 0,
+  &quot;replans&quot;: 0,
+  &quot;user&quot;: {
+    &quot;userId&quot;: &quot;3&quot;,
+    &quot;distance&quot;: 1,
+    &quot;withinProximity&quot;: true
+  }
+}</pre></details>
+<details><summary>10. 상대에게 근접 대화 — 통과</summary><p>입력</p><pre>{
+  &quot;content&quot;: &quot;거믕곰 님 안녕하세요, AI 계정이에요.&quot;
+}</pre><p>결과</p><pre>{
+  &quot;message&quot;: {
+    &quot;id&quot;: &quot;1791444565111002&quot;,
+    &quot;kind&quot;: &quot;public&quot;,
+    &quot;mine&quot;: true,
+    &quot;createdAt&quot;: 1791447152289,
+    &quot;links&quot;: [],
+    &quot;content&quot;: &quot;거믕곰 님 안녕하세요, AI 계정이에요.&quot;,
+    &quot;position&quot;: {
+      &quot;mapId&quot;: &quot;main&quot;,
+      &quot;x&quot;: 20,
+      &quot;y&quot;: 16,
+      &quot;dir&quot;: &quot;up&quot;
+    }
+  },
+  &quot;heardBy&quot;: [
+    {
+      &quot;userId&quot;: &quot;3&quot;,
+      &quot;kind&quot;: &quot;human&quot;,
+      &quot;distance&quot;: 1,
+      &quot;untrusted&quot;: {
+        &quot;nickname&quot;: &quot;거믕곰&quot;
+      }
+    }
+  ]
+}</pre></details>
+<details><summary>11. DM 보내기 — 통과</summary><p>입력</p><pre>{
+  &quot;userId&quot;: &quot;3&quot;,
+  &quot;content&quot;: &quot;[E2E 2026-10-08] AI 계정이 보낸 DM 이에요. 답장하면 보관함까지 확인돼요.&quot;
+}</pre><p>결과</p><pre>{
+  &quot;message&quot;: {
+    &quot;id&quot;: &quot;8&quot;,
+    &quot;kind&quot;: &quot;dm&quot;,
+    &quot;mine&quot;: true,
+    &quot;createdAt&quot;: 1791447153028,
+    &quot;links&quot;: [],
+    &quot;content&quot;: &quot;[E2E 2026-10-08] AI 계정이 보낸 DM 이에요. 답장하면 보관함까지 확인돼요.&quot;,
+    &quot;conversationId&quot;: &quot;8&quot;
+  }
+}</pre></details>
+<details><summary>12. DM 히스토리 — 통과</summary><p>입력</p><pre>{
+  &quot;userId&quot;: &quot;3&quot;,
+  &quot;limit&quot;: 5
+}</pre><p>결과</p><pre>{
+  &quot;userId&quot;: &quot;3&quot;,
+  &quot;items&quot;: [
+    {
+      &quot;id&quot;: &quot;8&quot;,
+      &quot;senderId&quot;: &quot;6&quot;,
+      &quot;mine&quot;: true,
+      &quot;createdAt&quot;: 1791447153028,
+      &quot;links&quot;: [],
+      &quot;content&quot;: &quot;[E2E 2026-10-08] AI 계정이 보낸 DM 이에요. 답장하면 보관함까지 확인돼요.&quot;
+    }
+  ],
+  &quot;nextCursor&quot;: null
+}</pre></details>
+<details><summary>13. 그룹 만들기 — 통과</summary><p>입력</p><pre>{
+  &quot;name&quot;: &quot;E2E 2026-10-08&quot;
+}</pre><p>결과</p><pre>{
+  &quot;group&quot;: {
+    &quot;groupId&quot;: &quot;2&quot;,
+    &quot;ownerId&quot;: &quot;6&quot;,
+    &quot;memberCount&quot;: 1,
+    &quot;createdAt&quot;: 1791447153296
+  }
+}</pre></details>
+<details><summary>14. 그룹에 초대 — 통과</summary><p>입력</p><pre>{
+  &quot;groupId&quot;: &quot;2&quot;,
+  &quot;userId&quot;: &quot;3&quot;
+}</pre><p>결과</p><pre>{
+  &quot;member&quot;: {
+    &quot;groupId&quot;: &quot;2&quot;,
+    &quot;userId&quot;: &quot;3&quot;,
+    &quot;role&quot;: &quot;member&quot;,
+    &quot;joinedAt&quot;: 1791447153437
+  }
+}</pre></details>
+<details><summary>15. 그룹 메시지 — 통과</summary><p>입력</p><pre>{
+  &quot;groupId&quot;: &quot;2&quot;,
+  &quot;content&quot;: &quot;[E2E 2026-10-08] 그룹 메시지 테스트&quot;
+}</pre><p>결과</p><pre>{
+  &quot;message&quot;: {
+    &quot;id&quot;: &quot;3&quot;,
+    &quot;kind&quot;: &quot;group&quot;,
+    &quot;mine&quot;: true,
+    &quot;createdAt&quot;: 1791447154179,
+    &quot;links&quot;: [],
+    &quot;content&quot;: &quot;[E2E 2026-10-08] 그룹 메시지 테스트&quot;,
+    &quot;groupId&quot;: &quot;2&quot;
+  }
+}</pre></details>
+<details><summary>16. 그룹 히스토리 — 통과</summary><p>입력</p><pre>{
+  &quot;groupId&quot;: &quot;2&quot;,
+  &quot;limit&quot;: 5
+}</pre><p>결과</p><pre>{
+  &quot;groupId&quot;: &quot;2&quot;,
+  &quot;items&quot;: [
+    {
+      &quot;id&quot;: &quot;3&quot;,
+      &quot;senderId&quot;: &quot;6&quot;,
+      &quot;mine&quot;: true,
+      &quot;createdAt&quot;: 1791447154179,
+      &quot;links&quot;: [],
+      &quot;content&quot;: &quot;[E2E 2026-10-08] 그룹 메시지 테스트&quot;
+    }
+  ],
+  &quot;nextCursor&quot;: null
+}</pre></details>
+<details><summary>17. 내 그룹 목록 — 통과</summary><p>입력</p><pre>{}</pre><p>결과</p><pre>{
+  &quot;items&quot;: [
+    {
+      &quot;groupId&quot;: &quot;2&quot;,
+      &quot;ownerId&quot;: &quot;6&quot;,
+      &quot;owner&quot;: true,
+      &quot;memberCount&quot;: 2,
+      &quot;unreadCount&quot;: 0,
+      &quot;createdAt&quot;: 1791447153296,
+      &quot;lastMessage&quot;: {
+        &quot;id&quot;: &quot;3&quot;,
+        &quot;senderId&quot;: &quot;6&quot;,
+        &quot;mine&quot;: true,
+        &quot;createdAt&quot;: 1791447154179,
+        &quot;links&quot;: [],
+        &quot;content&quot;: &quot;[E2E 2026-10-08] 그룹 메시지 테스트&quot;
+      },
+      &quot;untrusted&quot;: {
+        &quot;name&quot;: &quot;E2E 2026-10-08&quot;
+      }
+    }
+  ]
+}</pre></details>
+<details><summary>18. 보관함 읽기 — 통과</summary><p>입력</p><pre>{
+  &quot;limit&quot;: 50
+}</pre><p>결과</p><pre>{
+  &quot;state&quot;: &quot;online&quot;,
+  &quot;items&quot;: [
+    {
+      &quot;cursor&quot;: 1,
+      &quot;at&quot;: 1791447153445,
+      &quot;type&quot;: &quot;group_change&quot;,
+      &quot;groupId&quot;: &quot;2&quot;,
+      &quot;change&quot;: &quot;updated&quot;,
+      &quot;ownerId&quot;: &quot;6&quot;,
+      &quot;memberCount&quot;: 2,
+      &quot;untrusted&quot;: {
+        &quot;name&quot;: &quot;E2E 2026-10-08&quot;
+      }
+    }
+  ],
+  &quot;nextCursor&quot;: 1,
+  &quot;hasMore&quot;: false,
+  &quot;dropped&quot;: 0,
+  &quot;markedRead&quot;: {
+    &quot;dm&quot;: 0,
+    &quot;group&quot;: 0
+  }
+}</pre></details>
+<details><summary>19. 그룹 나가기 (정리) — 통과</summary><p>입력</p><pre>{
+  &quot;groupId&quot;: &quot;2&quot;
+}</pre><p>결과</p><pre>{
+  &quot;left&quot;: true
+}</pre></details>
+<details><summary>20. 입장 중 상태 — 통과</summary><p>입력</p><pre>{}</pre><p>결과</p><pre>{
+  &quot;state&quot;: &quot;online&quot;,
+  &quot;endedReason&quot;: null,
+  &quot;me&quot;: {
+    &quot;id&quot;: &quot;6&quot;,
+    &quot;nickname&quot;: &quot;리비리&quot;,
+    &quot;kind&quot;: &quot;ai&quot;
+  },
+  &quot;mapId&quot;: &quot;main&quot;,
+  &quot;position&quot;: {
+    &quot;mapId&quot;: &quot;main&quot;,
+    &quot;x&quot;: 20,
+    &quot;y&quot;: 16,
+    &quot;dir&quot;: &quot;up&quot;
+  },
+  &quot;proximityRadius&quot;: 5,
+  &quot;maxMessageLength&quot;: 200,
+  &quot;onlineCount&quot;: 2,
+  &quot;nearbyCount&quot;: 1,
+  &quot;unread&quot;: {
+    &quot;dm&quot;: 0,
+    &quot;group&quot;: 0
+  },
+  &quot;inbox&quot;: {
+    &quot;size&quot;: 2,
+    &quot;dropped&quot;: 0,
+    &quot;latestCursor&quot;: 2
+  },
+  &quot;rateLimit&quot;: null,
+  &quot;idle&quot;: {
+    &quot;minutes&quot;: 10,
+    &quot;leaveInSec&quot;: 600
+  },
+  &quot;sse&quot;: &quot;open&quot;,
+  &quot;lastEventId&quot;: &quot;1791444565105262&quot;,
+  &quot;baseUrl&quot;: &quot;https://stories.devple.net/api/v1&quot;,
+  &quot;moving&quot;: false
+}</pre></details>
+<details><summary>21. 퇴장 — 통과</summary><p>입력</p><pre>{}</pre><p>결과</p><pre>{
+  &quot;left&quot;: true
+}</pre></details>
+<details><summary>22. 퇴장 뒤 상태 — 통과</summary><p>입력</p><pre>{}</pre><p>결과</p><pre>{
+  &quot;state&quot;: &quot;idle&quot;,
+  &quot;endedReason&quot;: null,
+  &quot;me&quot;: {
+    &quot;id&quot;: &quot;6&quot;,
+    &quot;nickname&quot;: &quot;리비리&quot;,
+    &quot;kind&quot;: &quot;ai&quot;
+  },
+  &quot;mapId&quot;: null,
+  &quot;position&quot;: null,
+  &quot;proximityRadius&quot;: 5,
+  &quot;maxMessageLength&quot;: 200,
+  &quot;onlineCount&quot;: 0,
+  &quot;nearbyCount&quot;: 0,
+  &quot;unread&quot;: {
+    &quot;dm&quot;: 0,
+    &quot;group&quot;: 0
+  },
+  &quot;inbox&quot;: {
+    &quot;size&quot;: 2,
+    &quot;dropped&quot;: 0,
+    &quot;latestCursor&quot;: 2
+  },
+  &quot;rateLimit&quot;: null,
+  &quot;idle&quot;: {
+    &quot;minutes&quot;: 10,
+    &quot;leaveInSec&quot;: null
+  },
+  &quot;sse&quot;: null,
+  &quot;lastEventId&quot;: null,
+  &quot;baseUrl&quot;: &quot;https://stories.devple.net/api/v1&quot;,
+  &quot;moving&quot;: false
+}</pre></details>
+
+<h2>MCP 서버 로그 (stderr, 마지막 6줄 / 전체 6줄)</h2>
+<pre>[2026-10-08T08:12:28.352Z] INFO devple-mcp v0.1.0 listening on stdio (commu: https://stories.devple.net/api/v1, token: set)
+[2026-10-08T08:12:28.715Z] DEBUG sse connecting
+[2026-10-08T08:12:29.178Z] DEBUG sse open
+[2026-10-08T08:12:29.178Z] INFO entered Commu as 리비리
+[2026-10-08T08:12:37.649Z] DEBUG sse closed
+[2026-10-08T08:12:37.649Z] INFO left Commu (tool)</pre>
+</body>
+</html>
