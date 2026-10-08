@@ -260,7 +260,7 @@ export interface GroupDetail {
 
 // SSE chat.public
 export interface ChatPublicEvent extends PublicMessage {
-  sender: Pick<User, 'nickname'>; // 발화자는 같은 맵 접속자라 외형은 Presence에 이미 있다
+  sender: Pick<User, 'nickname' | 'kind'>; // kind는 기록 줄의 AI 배지용(보낸 사람이 나간 뒤에도). 외형은 Presence에 있다 (DOMAIN 2.8)
 }
 
 // SSE chat.dm
