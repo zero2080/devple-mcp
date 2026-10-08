@@ -12,10 +12,11 @@ import {
 } from './errors.js';
 import { CommuHttp } from './http.js';
 import { Inbox, type InboxItem } from './inbox.js';
-import { findPath, isBlocked, planHops, straightHops, type Hop, type MapGrid } from './map.js';
+import type { MapGrid } from './map.js';
+import { blockedBeforeMoving, Mover, type MoveResult } from './mover.js';
+import { createPathGrid, freeTileNear } from './pathfinding.js';
 import {
   mapGridSchema,
-  positionRejectedDetailsSchema,
   presenceLeftPayloadSchema,
   presenceSchema,
   presenceUpdatedPayloadSchema,
@@ -39,10 +40,10 @@ export interface SessionDeps {
   fetchImpl?: typeof fetch;
   clock?: Clock;
   requestTimeoutMs?: number;
-  /** 맵 격자. undefined 면 계약 자산(src/commu/contract/maps/main.json)을 쓰고, null 이면 맵 없이 동작 */
-  map?: MapGrid | null;
-  /** 이동 요청 사이 간격 (레이트 리밋 10회/초 → 기본 120ms) */
-  hopIntervalMs?: number;
+  /** 맵 격자. 기본은 계약 자산(src/commu/contract/maps/main.json) */
+  map?: MapGrid;
+  /** 이동 속도·배칭 (기본 150ms/타일 · 200ms 전송 · 40타일, 테스트용) */
+  move?: { tileMs?: number; batchMs?: number; maxTiles?: number };
   /** SSE 유휴 타임아웃·백오프 (테스트용) */
   sse?: { idleTimeoutMs?: number; backoff?: { initialMs: number; maxMs: number; jitter: number } };
   inboxCapacity?: number;
@@ -67,23 +68,16 @@ export interface SessionStatus {
   sse: SseState | null;
   lastEventId: string | null;
   baseUrl: string;
-  mapLoaded: boolean;
+  /** commu_move_to 진행 중 */
+  moving: boolean;
 }
 
-export interface MoveRejection extends TilePoint {
-  reason: string;
-}
+/** commu_move_to 입력 (MCP.md 5.3): 타일 좌표 또는 사람 */
+export type MoveTarget = { x: number; y: number } | { userId: string };
 
-export interface MoveResult {
-  reached: boolean;
-  from: Position;
-  position: Position;
-  distanceToTarget: number;
-  hops: number;
-  plannedHops: number;
-  pathLength: number | null;
-  rejections: MoveRejection[];
-  stoppedBecause?: string;
+export interface MoveToResult extends MoveResult {
+  /** { userId } 목적지일 때 그 사람과의 거리 (체비쇼프) 와 근접 반경 안 여부 */
+  user?: { userId: string; distance: number; withinProximity: boolean };
 }
 
 export interface SayResult {
@@ -103,18 +97,21 @@ export class CommuSession {
   readonly http: CommuHttp;
   readonly auth: AuthManager;
   readonly client: CommuClient;
-  readonly map: MapGrid | null;
+  readonly map: MapGrid;
   state: SessionState = 'idle';
 
   private sse: SseClient | null = null;
   private entering: Promise<SessionStatus> | null = null;
   private leaving: Promise<void> | null = null;
+  /** 행동 도구·이동을 호출 순서대로 하나씩 (위치 경쟁 방지, ARCHITECTURE 6) */
+  private actions: Promise<unknown> = Promise.resolve();
+  private moving: Promise<unknown> | null = null;
   private idleTimer: ClockTimer | null = null;
   private idleDeadline: number | null = null;
   private lastSeq = 0;
   private readonly fetchImpl: typeof fetch;
   private readonly clock: Clock;
-  private readonly hopIntervalMs: number;
+  private readonly mover: Mover;
   private readonly sseOptions: SessionDeps['sse'];
 
   constructor(
@@ -123,7 +120,6 @@ export class CommuSession {
   ) {
     this.fetchImpl = deps.fetchImpl ?? globalThis.fetch;
     this.clock = deps.clock ?? systemClock;
-    this.hopIntervalMs = deps.hopIntervalMs ?? 120;
     this.sseOptions = deps.sse;
     this.http = new CommuHttp(
       config.apiBaseUrl,
@@ -136,7 +132,21 @@ export class CommuSession {
     );
     this.http.tokenSource = this.auth;
     this.client = new CommuClient(this.http);
-    this.map = deps.map !== undefined ? deps.map : loadContractMap();
+    this.map = deps.map ?? loadContractMap();
+    this.mover = new Mover({
+      clock: this.clock,
+      map: this.map,
+      occupied: () => this.world.others().map((p) => p.position),
+      putPosition: (body) => this.client.putPosition(body),
+      nextSeq: () => {
+        this.lastSeq = Math.max(this.clock.now(), this.lastSeq + 1);
+        return this.lastSeq;
+      },
+      onAccepted: (position) => this.world.setMyPosition(position, this.clock.now()),
+      ...(deps.move?.tileMs !== undefined ? { tileMs: deps.move.tileMs } : {}),
+      ...(deps.move?.batchMs !== undefined ? { batchMs: deps.move.batchMs } : {}),
+      ...(deps.move?.maxTiles !== undefined ? { maxTiles: deps.move.maxTiles } : {}),
+    });
     this.inbox = new Inbox({
       capacity: deps.inboxCapacity ?? 500,
       now: () => this.clock.now(),
@@ -239,10 +249,21 @@ export class CommuSession {
   }
 
   /**
-   * 행동 도구의 본문 (MCP.md 3.1·7): 입장돼 있지 않으면 자동 입장하고 fn 을 부른다. 서버가
-   * `404 NOT_FOUND resource: 'presence'` 로 답하면(SSE 가 조용히 끊겨 유예가 지난 경우 등) 다시 입장해 한 번만 재시도한다
+   * 행동 도구의 본문 (MCP.md 3.1·7): 앞선 행동·이동이 끝난 뒤 차례로 실행한다 (이동 중 발화·DM 이 끼어들지 않게, ARCHITECTURE 6).
+   * 입장돼 있지 않으면 자동 입장하고 fn 을 부른다. 서버가 `404 NOT_FOUND resource: 'presence'` 로 답하면(SSE 가 조용히 끊겨
+   * 유예가 지난 경우 등) 다시 입장해 한 번만 재시도한다
    */
-  async act<T>(fn: () => Promise<T>): Promise<T> {
+  act<T>(fn: () => Promise<T>): Promise<T> {
+    return this.enqueue(() => this.runAction(fn));
+  }
+
+  private enqueue<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.actions.then(fn, fn);
+    this.actions = run.catch(() => undefined);
+    return run;
+  }
+
+  private async runAction<T>(fn: () => Promise<T>): Promise<T> {
     await this.ensureOnline();
     try {
       return await fn();
@@ -306,7 +327,7 @@ export class CommuSession {
       sse: this.sse?.state ?? null,
       lastEventId: this.sse?.lastEventId ?? null,
       baseUrl: this.config.apiBaseUrl,
-      mapLoaded: this.map !== null,
+      moving: this.moving !== null,
     };
   }
 
@@ -318,77 +339,51 @@ export class CommuSession {
   }
 
   /**
-   * 목적지까지 이동. 맵이 있으면 BFS 경로를 3칸씩 끊어 보내고, 없으면 직선으로 간다.
-   * 409 POSITION_REJECTED 는 서버 인정 위치로 보정한다. 목적지가 점유돼 있으면 직전 타일에서 멈춘다.
-   * (C4 에서 MCP.md 5.3 의 mover 로 교체)
+   * commu_move_to (MCP.md 5.3): 좌표 또는 사람 옆 빈 칸까지 A* 경로로 걷는다 (mover.ts). 다른 행동과 같은 줄에서 차례로
+   * 실행되고(act), 입장 전이면 자동 입장, 서버에 Presence 가 없으면 재입장 1회. 결과 position 이 서버가 인정한 내 위치
    */
-  async moveTo(target: TilePoint, opts: { maxHops?: number } = {}): Promise<MoveResult> {
-    await this.ensureOnline();
+  moveTo(target: MoveTarget): Promise<MoveToResult> {
+    const current: Promise<MoveToResult> = this.act(() => this.doMove(target)).finally(() => {
+      if (this.moving === current) this.moving = null;
+    });
+    this.moving = current;
+    return current;
+  }
+
+  private async doMove(target: MoveTarget): Promise<MoveToResult> {
     const me = this.requirePresence();
     const from = me.position;
-    const mapId = from.mapId;
-    const occupied = (p: TilePoint) => this.world.occupantAt(p, me.userId) !== undefined;
+    if (!('userId' in target)) return this.mover.run(from, target);
 
-    let hops: Hop[];
-    let pathLength: number | null = null;
-    if (this.map) {
-      if (isBlocked(this.map, target)) {
-        return this.moveResult(from, from, target, 0, 0, null, [], 'collision');
-      }
-      const path = findPath(this.map, from, target, occupied);
-      if (path === null) {
-        return this.moveResult(from, from, target, 0, 0, null, [], 'no_path');
-      }
-      if (occupied(target)) path.pop();
-      pathLength = path.length;
-      hops = planHops(from, path);
-    } else {
-      hops = straightHops(from, target);
-    }
-
-    const maxHops = opts.maxHops ?? 100;
-    const planned = hops.slice(0, maxHops);
-    const rejections: MoveRejection[] = [];
-    let current: Position = from;
-    let accepted = 0;
-    let stoppedBecause: string | undefined;
-
-    for (const hop of planned) {
-      const seq = Math.max(this.clock.now(), this.lastSeq + 1);
-      this.lastSeq = seq;
-      try {
-        await this.client.putPosition({ mapId, x: hop.x, y: hop.y, dir: hop.dir, seq });
-        current = { mapId, x: hop.x, y: hop.y, dir: hop.dir };
-        this.world.setMyPosition(current, this.clock.now());
-        accepted++;
-      } catch (error) {
-        if (!(error instanceof CommuApiError) || error.code !== 'POSITION_REJECTED') throw error;
-        const details = positionRejectedDetailsSchema.safeParse(error.details);
-        const reason = details.success ? details.data.reason : 'unknown';
-        if (details.success) {
-          current = details.data.position;
-          this.world.setMyPosition(current, this.clock.now());
-        }
-        rejections.push({ x: hop.x, y: hop.y, reason });
-        if (reason === 'occupied' || reason === 'collision' || rejections.length >= 3) {
-          stoppedBecause = reason;
-          break;
-        }
-      }
-      if (this.hopIntervalMs > 0) await this.clock.sleep(this.hopIntervalMs);
-    }
-    if (!stoppedBecause && hops.length > planned.length) stoppedBecause = 'max_hops';
-
-    return this.moveResult(
-      from,
-      current,
-      target,
-      accepted,
-      planned.length,
-      pathLength,
-      rejections,
-      stoppedBecause,
+    const { userId } = target;
+    if (userId === me.userId) throw new Error('자기 자신에게는 이동할 수 없습니다');
+    const located = await this.locateUser(userId, from.mapId);
+    if ('reason' in located) return blockedBeforeMoving(from, from, located.reason);
+    const grid = createPathGrid(
+      this.map,
+      this.world.others().map((p) => p.position),
     );
+    const goal = freeTileNear(grid, located.tile, from);
+    if (!goal) return blockedBeforeMoving(from, located.tile, 'no_free_tile');
+    const result = await this.mover.run(from, goal, { face: located.tile });
+    // 걷는 동안 그 사람이 움직였을 수 있다 — 거리는 지금 월드 기준
+    const now = this.world.others().find((p) => p.userId === userId)?.position ?? located.tile;
+    const distance = chebyshev(result.position, now);
+    const radius = this.serverConfig?.proximityRadius ?? 5;
+    return { ...result, user: { userId, distance, withinProximity: distance <= radius } };
+  }
+
+  /** 월드에 있으면 그 위치, 없으면 GET /users/{id} (없는 사람은 404 NOT_FOUND user 그대로) */
+  private async locateUser(
+    userId: string,
+    mapId: string,
+  ): Promise<{ tile: TilePoint } | { reason: 'user_offline' | 'other_map' }> {
+    const known = this.world.others().find((p) => p.userId === userId);
+    if (known) return { tile: known.position };
+    const profile = await this.client.getUser(userId);
+    if (!profile.online || !profile.position) return { reason: 'user_offline' };
+    if (profile.position.mapId !== mapId) return { reason: 'other_map' };
+    return { tile: profile.position };
   }
 
   /** 근접 공개 대화. 반경 안에 있어 들었을 접속자 닉네임을 함께 돌려준다 */
@@ -533,40 +528,17 @@ export class CommuSession {
       log.warn(`inbox skipped ${envelope.type}`, error);
     }
   }
-
-  private moveResult(
-    from: Position,
-    position: Position,
-    target: TilePoint,
-    hops: number,
-    plannedHops: number,
-    pathLength: number | null,
-    rejections: MoveRejection[],
-    stoppedBecause?: string,
-  ): MoveResult {
-    const distanceToTarget = chebyshev(position, target);
-    return {
-      reached: distanceToTarget === 0,
-      from,
-      position,
-      distanceToTarget,
-      hops,
-      plannedHops,
-      pathLength,
-      rejections,
-      ...(stoppedBecause ? { stoppedBecause } : {}),
-    };
-  }
 }
 
 /** 계약 자산 맵 (프론트 src/assets/maps/main.json 의 동기화 사본). 빌드에서는 dist/commu/contract/maps/main.json */
-function loadContractMap(): MapGrid | null {
-  try {
-    return mapGridSchema.parse(contractMap);
-  } catch (error) {
-    log.warn('contract map could not be loaded; moving without pathfinding', error);
-    return null;
+function loadContractMap(): MapGrid {
+  const parsed = mapGridSchema.safeParse(contractMap);
+  if (!parsed.success) {
+    throw new Error(
+      `계약 자산 맵을 읽을 수 없습니다 (src/commu/contract/maps/main.json): ${parsed.error.message}`,
+    );
   }
+  return parsed.data;
 }
 
 /** MCP.md 7: 입장(Presence)이 서버에 없다는 응답 — 행동 도구는 다시 입장해 한 번 재시도한다 */

@@ -16,6 +16,7 @@ import type {
   groupMessageSchema,
   groupSchema,
   noticeSchema,
+  positionRejectedDetailsSchema,
   positionSchema,
   presenceSchema,
   presenceStateSchema,
@@ -48,6 +49,7 @@ export const aiTokenExchangeResponseSchema = authSessionSchema;
 export type Appearance = z.infer<typeof appearanceSchema>;
 export type Direction = z.infer<typeof directionSchema>;
 export type Position = z.infer<typeof positionSchema>;
+export type PositionRejectedReason = z.infer<typeof positionRejectedDetailsSchema>['reason'];
 export type Presence = z.infer<typeof presenceSchema>;
 export type PresenceState = z.infer<typeof presenceStateSchema>;
 export type MapGridData = z.infer<typeof mapGridSchema>;

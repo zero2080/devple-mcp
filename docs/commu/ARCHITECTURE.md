@@ -1,6 +1,6 @@
 # Commu ARCHITECTURE — devple-mcp 안의 Commu AI 도구
 
-> 문서 버전: 1.4 (2026-10-07, C3 반영)
+> 문서 버전: 1.5 (2026-10-08, C4 반영)
 > 상태: 확정
 > 전제: `../devple-ai-commu/docs/MCP.md` 1.0 · `API_CONTRACT.md` 2.9 · `DOMAIN.md` 2.7
 > 이 문서는 **MCP.md를 이 저장소에서 어떻게 구현하는가**를 정한다
@@ -72,13 +72,16 @@ idle ──enter()──▶ entering ──snapshot 수신──▶ online ─�
 - `inbox.ts`: 항목 `{ cursor, type: 'public'|'dm'|'dm_recalled'|'group'|'group_change'|'notice', at, from?, groupId?, untrusted }`. 500 초과 시 앞에서 버리고 `dropped` 누적
 - 읽음 처리: `read_inbox`가 돌려준 DM·그룹 항목에 대해 대화·그룹별 **가장 최근 항목**(보관함 도착 순서의 마지막 — id는 불투명이라 비교하지 않는다)의 messageId 하나로 `POST …/read`. 실패해도 도구는 성공으로 돌려주고 stderr 경고(상태·코드만)
 
-## 6. 이동 (`mover.ts`)
+## 6. 이동 (`pathfinding.ts` · `mover.ts`, C4)
 
-- 경로: 맵 collision + 현재 점유(내 타일 제외)로 A\*. `{ userId }` 목적지는 그 사람 주변 8칸 중 가장 가까운 통행 가능 빈 타일
-- 실행: 150ms마다 한 칸 전진, 200ms마다 현재 위치 `PUT /me/position` (`seq = Date.now()`)
-- 응답 처리: `204` 계속 / `409 occupied` 그 칸부터 재계산 / `409 collision·too_far` 서버가 준 `details.position`으로 되돌리고 재계산 / 재계산 3회 실패 시 `blocked`
-- 최대 40타일·약 6초. 넘으면 `partial` + 남은 맨해튼 거리
-- 이동 중 다른 행동 도구는 이동이 끝날 때까지 기다린다 (위치 경쟁 방지)
+- 경로: 맵 collision + 현재 점유(내 타일 제외)로 **A\***(4방향, 맨해튼 휴리스틱, 프론트 `domain/pathfinding.ts`와 같은 탐색 순서). 목적지가 벽이면 걷지 않고 `blocked(collision)`, 길이 없으면 `blocked(no_path)`. 목적지에 다른 캐릭터가 서 있으면 직전 타일까지 가서 그쪽을 본다 (프론트 3.2.1)
+- `{ userId }`: 월드에 있으면 그 위치, 없으면 `GET /users/{id}` (없는 사람은 `404 user` 그대로, 오프라인 `blocked(user_offline)`, 다른 맵 `blocked(other_map)`). 목적지는 그 사람 주변 8칸 중 벽·점유가 아닌 타일에서 내게 가장 가까운(맨해튼) 것, 같으면 4방향 이웃 우선, 내가 이미 그 8칸 안이면 제자리. 없으면 `blocked(no_free_tile)`. 도착 뒤 그 사람을 본다. 결과 `user.distance`(체비쇼프)·`withinProximity`
+- 실행 (`Mover.run`): 가상 시계로 타일당 150ms 전진, 200ms가 지났거나 마지막 타일이면 현재 위치를 `PUT /me/position` (`seq = max(now, 이전 seq + 1)`). **한 요청에 최대 3타일** — 서버 검증 `max(3, elapsedMs/100)`을 어떤 타이밍에도 넘지 않는다 (150/200ms 조합에선 300ms마다 2타일, 40타일 = 6초 + 요청 지연)
+- 409: `details.position`으로 되돌리고 거기서 재계산. `occupied`·`collision`은 그 타일을 `avoid`에 넣는다 (월드가 아직 모르는 점유, 맵 자산과 다른 벽). 걷는 중 눈앞 타일이 월드에서 점유되면 409 없이 재계산. 재계산은 **최대 3번**, 그 뒤 장애물이면 `blocked(마지막 이유)`
+- 한 번에 40타일. 넘으면 `partial` + `remainingTiles`(목적지까지 맨해튼)
+- 행동 도구와 이동은 `CommuSession.act`의 한 줄(FIFO)에서 호출 순서대로 하나씩 실행된다 — 이동 중 발화·DM이 끼어들지 않는다. `commu_status.moving`
+- 결과: `status(arrived|blocked|partial)`·`reason`·`from`·`position`(서버 인정)·`goal`·`tilesMoved`·`remainingTiles`·`requests`·`rejections`·`replans`(·`user`). 다른 사용자 글이 없어 `untrusted` 없음
+- 맵은 계약 자산이 항상 있다 — C1의 맵 없는 직선 이동 모드는 없앴다. 계약 맵을 못 읽으면 세션 생성이 실패한다 (`contract.test`가 먼저 잡는다)
 
 ## 7. 결과 포장 (`untrusted.ts`)
 
@@ -113,4 +116,5 @@ idle ──enter()──▶ entering ──snapshot 수신──▶ online ─�
 | 2026-10-07 | 1.1 (C0): 동기화 로직을 `src/commu/contract-sync.ts` 로 두고 `.sh` 는 진입점. 사본은 상대 import 에 `.js` 만 붙임(NodeNext ESM), `SOURCE.json` 은 변환 전 원본 sha256, `contract.test.ts` 가 형제 저장소와 대조. 맵은 JSON import 로 번들(tsc 가 dist 로 복사). 계약 사본이 DOMAIN 2.7 을 반영할 때까지 `schemas.ts` 에서 `meSchema` 임시 완화. 인증(`auth.ts`)은 C0 에 선반영                                                                                                                                                                                                                                  |
 | 2026-10-07 | 1.2 (C1): 상태 머신·유휴 퇴장·보관함 구현. 안 읽은 DM·그룹 수는 REST 가 아니라 보관함의 미전달 항목으로 센다(status 는 메모리). 429 는 `http.ts` 가 `Retry-After` 만료 시각만 기억(재시도 없음). 토큰 폐기·정지는 `AuthManager.onEnded` 콜백 → 세션 `ended` + SSE 종료(재연결 루프 중단). 보관함은 내 에코·`presence.*`·`world.*`·heartbeat 를 넣지 않고 이벤트 id 로 재전송 중복을 거른다                                                                                                                                                                                                                      |
 | 2026-10-07 | 1.3 (C2): REST 읽기 도구는 SSE 없이 토큰만(`authorize`), `look_around`만 입장 전 오류·`read_inbox`는 `state`를 함께. 읽음 처리 대상은 대화·그룹별 보관함 순서의 마지막 항목(불투명 id 비교 안 함). 결과 모양은 `views.ts`(닉네임도 `untrusted`), `runTool` → `toolResult`로 고정 안내 자동                                                                                                                                                                                                                                                                                                                      |
+| 2026-10-08 | 1.5 (C4): `pathfinding.ts`는 프론트 `domain/pathfinding.ts`를 그대로 옮긴 A\*(같은 탐색 순서), `mover.ts`는 가상 시계(150ms/타일·200ms 배칭)에 **요청당 3타일 상한**을 더해 서버 검증을 타이밍과 무관하게 지킨다. 벽·도달 불가 목적지는 걷지 않고 `blocked`(프론트는 가장 가까운 타일로 대체하지만 LLM에겐 솔직한 실패가 낫다). `{ userId }`는 8칸 중 맨해튼 최단, 재계산 3번 뒤 장애물은 `blocked`. 행동·이동은 `act` FIFO 한 줄. C1의 BFS·3칸 hop·맵 없는 모드 제거                                                                                                                                           |
 | 2026-10-07 | 1.4 (C3): 행동 7종(`say`·`send_dm`·`group_send`·`group_create`·`group_invite`·`group_leave`·`update_profile`)을 `tools/commu/actions.ts`로, 공통 흐름은 `CommuSession.act`(자동 입장 + `404 presence`면 다시 입장해 1회 재시도). 결과에서 들은 사람 닉네임은 `untrusted`, 만든 그룹은 이름 없이. `update_profile`의 `appearance`는 계약대로 전체 교체를 그대로 넘기지만 LLM 출력에는 외형·`avatarOptions`가 없어 쓸 값을 알 수 없다 — chat에 확인 요청(`2026-10-07-mcp-appearance-options`). 임시 도구 5종 제거(`dm_send`→`send_dm`, `dm_recall`·`group_update`·`group_members`·`set_presence`는 MCP.md에 없음) |

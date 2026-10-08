@@ -1,6 +1,6 @@
 # Commu ROADMAP — devple-mcp 구현 순서
 
-> 문서 버전: 1.4 (2026-10-07, C3 완료)
+> 문서 버전: 1.5 (2026-10-08, C4 완료)
 > 최종 목표: **Claude Desktop·Code에 등록한 이 MCP 서버로 AI 계정이 운영 Commu(`stories.devple.net`)에 들어와 이동·근접 대화·DM·그룹을 한다**
 > 의존: 서버(`devple-stories`)의 AI 계정 API(API_CONTRACT 2.9). 서버가 끝나기 전에는 가짜 Commu 서버로 개발한다
 
@@ -60,15 +60,17 @@
 - 남은 질문: `update_profile`의 `appearance` — LLM이 쓸 수 있는 아이템·색 ID(`avatarOptions`)와 현재 외형을 볼 길이 없다. chat 확인 요청 `2026-10-07-mcp-appearance-options`(계약대로 입력은 받는다)
 - 실서버 미검증 — 서버 S12a(PR 대기)가 머지되면 C5에서
 
-### C4: 이동 `[ ]`
+### C4: 이동 `[x]`
 
-`pathfinding.ts`, `mover.ts`, `commu_move_to`
+`pathfinding.ts`, `mover.ts`, `commu_move_to` (`tools/commu/move.ts`)
 
 **완료**
 
-- [ ] 장애물 우회, `{ userId }` 목적지는 그 사람 옆 빈 칸
-- [ ] 가짜 서버가 `409 occupied`/`too_far`를 줄 때 재계산, 3회 실패 → `blocked`
-- [ ] 40타일 초과 → `partial`, 서버 검증(`max(3, elapsedMs/100)`)을 넘는 요청 없음
+- [x] 장애물 우회, `{ userId }` 목적지는 그 사람 옆 빈 칸 (`pathfinding.test` 벽 우회·`freeTileNear`, `session.test` userId → 옆 칸·바라보기·오프라인·없는 사람, `commu.test` 계약 맵에서 좌표·userId)
+- [x] 가짜 서버가 `409 occupied`/`too_far`를 줄 때 재계산, 재계산 3번 뒤 장애물 → `blocked` (`mover.test`·`session.test`: 월드가 모르는 점유 1회 우회, too_far 4회 → `blocked` + 서버 위치)
+- [x] 40타일 초과 → `partial`, 서버 검증(`max(3, elapsedMs/100)`)을 넘는 요청 없음 (`mover.test` ManualClock: 300ms마다 2타일, 요청마다 ≤3칸, 6초에 `partial`·남은 거리)
+- 이동 중 행동 도구는 기다린다 (`session.test` FIFO), 입력은 `{ x, y }`·`{ userId }` 중 하나만 (`commu.test`)
+- 실서버 미검증 — C5
 
 ### C5: 안전·마감 `[ ]`
 
@@ -98,4 +100,5 @@ CLAUDE.md의 Commu 절과 docs/commu/ARCHITECTURE.md, docs/commu/ROADMAP.md를 �
 | 2026-10-07 | 1.1: **C0 완료**. 인증(AI 토큰 교환, MCP.md 3.2·3.4)을 C1 에서 C0 로 당김 — 환경변수를 `DEVPLE_COMMU_*` 로 바꾸면 기존 접근 키 로그인 경로가 사라져 테스트를 유지하려면 함께 가야 했음. 계약 사본은 상대 import 에 `.js` 만 붙이고 `SOURCE.json` 은 원본 sha256. 프론트 스키마가 DOMAIN 2.7 을 반영할 때까지 `src/commu/schemas.ts` 에서 `meSchema` 임시 완화(to-code info 발송). 기동 시 자동 입장 제거(MCP.md 3.1), 가짜 Commu 서버는 AI 전용, README 환경변수 선반영. 기존 `commu_*` 25종은 C1~C3 에서 MCP.md 17종으로 교체                                                                                                                                                                               |
 | 2026-10-07 | 1.2: **C1 완료**. 세션 상태 머신(idle→entering→online→leaving / ended), 단일 진행 입장, `runTool` 의 `touch()` 로 유휴 타이머 리셋, `inbox.ts` 가 `events.ts`·`commu_events` 를 대체(읽기 도구는 C2 `read_inbox`), `commu_connect/disconnect` → `commu_enter/leave`, `commu_status` 에 안 읽음(보관함 기준)·429 남은 시간·자동 퇴장까지 시간. 토큰 폐기가 세션 중 확인되면 `AuthManager` 콜백으로 `ended` + SSE 종료. 인박스 요청대로 계약 자산 재동기화(`48fd94b`, 자산 내용은 `df5a4af` 와 동일)·`meSchema` 임시 완화 제거                                                                                                                                                                                 |
 | 2026-10-07 | 1.3: **C2 완료**. 읽기 6종(`look_around`·`find_user`·`read_inbox`·`dm_history`·`list_groups`·`group_history`). REST 읽기 도구는 입장(SSE) 없이 토큰만 교환(`session.authorize()`), 메모리 도구 중 `look_around`만 입장 전 오류이고 `read_inbox`는 빈 결과 + `state`. 읽음 처리는 대화·그룹마다 보관함 순서의 마지막 메시지(id 비교 안 함), 실패는 경고만. 결과 모양은 `views.ts`에서 닉네임까지 `untrusted`로, `runTool`이 `toolResult`로 고정 안내를 붙임. 바뀐 임시 도구 11종 제거(`nearby`·`search_users`·`get_user`·`me`·`dm_conversations`·`dm_history`(교체)·`dm_read`·`groups`·`group_detail`·`group_history`(교체)·`group_read`), 서버 instructions·`commu-participant` 프롬프트의 옛 도구 이름 정리 |
+| 2026-10-08 | 1.5: **C4 완료**. A\* 는 프론트 `domain/pathfinding.ts` 포팅, 실행기는 가상 시계 150ms/타일·200ms 배칭에 요청당 3타일 상한. 벽·도달 불가 목적지는 `blocked`(프론트의 대체 이동 안 함), 점유된 목적지는 직전 칸·바라보기, `{ userId }` 는 8칸 중 맨해튼 최단. 재계산 3번 뒤 장애물 `blocked`. 행동·이동 FIFO. C1 임시 `commu_move_to`(BFS·3칸 hop·`maxHops`)·맵 없는 모드 제거, `status.mapLoaded` → `moving`                                                                                                                                                                                                                                                                                                 |
 | 2026-10-07 | 1.4: **C3 완료**. 행동 7종을 MCP.md 5.3 이름·입력으로(`tools/commu/actions.ts`), `CommuSession.act` = 자동 입장 + `404 presence` 재입장 1회. 임시 도구 5종 제거(`dm_send`·`dm_recall`·`group_update`·`group_members`·`set_presence`) — 회수·이름 변경·해산·강퇴·자리비움은 MCP.md에 없다. `say`의 `heardBy`를 닉네임 배열에서 `{ userId, kind, distance, untrusted }`로(6.1). `appearance` 입력은 받되 쓸 값을 알 길이 없어 chat에 질문                                                                                                                                                                                                                                                                      |

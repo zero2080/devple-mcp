@@ -1,6 +1,6 @@
 // C3 행동 도구 7종 (MCP.md 5.3). 입장 전이면 자동 입장(MCP.md 3.1), 서버에 Presence 가 없으면 다시 입장해 한 번 재시도
 // (MCP.md 7) — 둘 다 CommuSession.act. 429 는 재시도하지 않고 남은 시간을 오류 문장과 commu_status 로 알린다 (MCP.md 6.3).
-// commu_move_to 는 C4 에서 바뀌므로 world.ts 에 남는다
+// commu_move_to 는 move.ts (C4)
 import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 

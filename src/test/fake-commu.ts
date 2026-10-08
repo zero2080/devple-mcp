@@ -97,6 +97,8 @@ export class FakeCommu {
   private readonly expiredTokens = new Set<string>();
   private rateLimitOnce: number | null = null;
   private presenceMissingOnce = false;
+  private positionRejects: { reason: 'collision' | 'too_far' | 'occupied'; left: number } | null =
+    null;
   private readonly tickets = new Set<string>();
   private readonly streams = new Set<http.ServerResponse>();
   /** 재전송 버퍼 (API_CONTRACT 3.1: lastEventId 이후를 snapshot 뒤에 다시 보낸다) */
@@ -177,6 +179,14 @@ export class FakeCommu {
    */
   losePresenceOnce(): void {
     this.presenceMissingOnce = true;
+  }
+
+  /**
+   * 다음 count 번의 PUT /me/position 을 reason 으로 409 거부한다 (details.position 은 현재 인정 위치).
+   * 월드가 아직 모르는 끼어든 사람(occupied)·서버만 아는 벽(collision)·오래된 위치(too_far) 흉내
+   */
+  rejectPositions(reason: 'collision' | 'too_far' | 'occupied', count = 1): void {
+    this.positionRejects = { reason, left: count };
   }
 
   /** 모든 열린 SSE 스트림에 이벤트를 쓴다 */
@@ -420,6 +430,10 @@ export class FakeCommu {
           seq: b.seq - 1,
           reason,
         });
+      if (this.positionRejects && this.positionRejects.left > 0) {
+        this.positionRejects.left -= 1;
+        return reject(this.positionRejects.reason);
+      }
       if (this.blockedTiles.has(`${b.x},${b.y}`) || b.x < 0 || b.y < 0 || b.x >= 40 || b.y >= 30) {
         return reject('collision');
       }
