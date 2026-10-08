@@ -150,7 +150,6 @@ export class CommuSession {
     this.inbox = new Inbox({
       capacity: deps.inboxCapacity ?? 500,
       now: () => this.clock.now(),
-      resolveKind: (userId) => this.world.kindOf(userId),
     });
   }
 

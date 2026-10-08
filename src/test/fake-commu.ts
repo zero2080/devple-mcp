@@ -494,7 +494,10 @@ export class FakeCommu {
         createdAt: Date.now(),
         position: this.myPosition,
       };
-      this.emit('chat.public', { ...message, sender: { nickname: this.me.nickname } });
+      this.emit('chat.public', {
+        ...message,
+        sender: { nickname: this.me.nickname, kind: this.me.kind },
+      });
       return json(201, message);
     }
 

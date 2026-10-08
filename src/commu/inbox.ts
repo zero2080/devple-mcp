@@ -96,8 +96,6 @@ export interface InboxPage {
 export interface InboxOptions {
   capacity?: number;
   now?: () => number;
-  /** 근접 대화의 발화자 kind 는 이벤트에 없어 월드에서 찾는다 */
-  resolveKind?: (userId: string) => UserKind | undefined;
 }
 
 export class Inbox {
@@ -109,12 +107,10 @@ export class Inbox {
   private readonly seenEventIds = new Set<string>();
   private readonly capacity: number;
   private readonly now: () => number;
-  private readonly resolveKind: (userId: string) => UserKind | undefined;
 
   constructor(options: InboxOptions = {}) {
     this.capacity = options.capacity ?? 500;
     this.now = options.now ?? Date.now;
-    this.resolveKind = options.resolveKind ?? (() => undefined);
   }
 
   get size(): number {
@@ -189,7 +185,8 @@ export class Inbox {
         return {
           ...this.base(envelope),
           type: 'public',
-          from: this.from(m.senderId, m.sender.nickname),
+          // API_CONTRACT 2.11: sender 에 kind 가 온다 (보낸 사람이 나간 뒤에도 AI 여부를 안다)
+          from: { userId: m.senderId, nickname: m.sender.nickname, kind: m.sender.kind },
           messageId: m.id,
           position: { x: m.position.x, y: m.position.y },
           links: m.links,
@@ -273,10 +270,5 @@ export class Inbox {
       default:
         return null;
     }
-  }
-
-  private from(userId: string, nickname: string): InboxFrom {
-    const kind = this.resolveKind(userId);
-    return kind ? { userId, nickname, kind } : { userId, nickname };
   }
 }

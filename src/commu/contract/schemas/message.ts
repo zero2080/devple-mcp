@@ -1,7 +1,7 @@
 // DOMAIN 5·6·9장 메시지·그룹·공지·합성 타입 스키마
 import { z } from 'zod';
 
-import { epochMs } from './common.js';
+import { epochMs, userKindSchema } from './common.js';
 import { userSchema } from './user.js';
 import { positionSchema } from './world.js';
 
@@ -94,7 +94,8 @@ export const groupDetailSchema = z.object({
 });
 
 export const chatPublicEventSchema = publicMessageSchema.extend({
-  sender: userSchema.pick({ nickname: true }),
+  // DOMAIN 2.8: kind는 기록 줄 AI 배지용. 서버 2.11(devple-stories PR #33, 2026-10-08 배포)부터 보내므로 필수 — 호환 기본값 없음
+  sender: userSchema.pick({ nickname: true }).extend({ kind: userKindSchema }),
 });
 
 export const chatDmEventSchema = dmMessageSchema.extend({

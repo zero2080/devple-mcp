@@ -229,7 +229,7 @@ describe('commu_* 도구 (MCP 클라이언트 → 서버 → 가짜 Commu)', () 
       links: ['https://example.com'],
       createdAt: Date.now(),
       position: { mapId: 'main', x: 23, y: 15, dir: 'left' },
-      sender: { nickname: '도트' },
+      sender: { nickname: '도트', kind: 'human' },
     });
     await waitUntil(() => session.inbox.size === 1);
 
