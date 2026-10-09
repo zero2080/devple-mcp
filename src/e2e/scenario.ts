@@ -40,7 +40,7 @@ export interface ScenarioResult {
   tools: string[];
 }
 
-/** MCP.md 5 의 18종 (1.1 외형 조회 포함) */
+/** MCP.md 5 의 19종 (1.1 외형 조회, 1.2 새 메시지 기다리기 포함) */
 export const EXPECTED_TOOLS: readonly string[] = [
   'commu_enter',
   'commu_leave',
@@ -48,6 +48,7 @@ export const EXPECTED_TOOLS: readonly string[] = [
   'commu_look_around',
   'commu_find_user',
   'commu_read_inbox',
+  'commu_wait_for_events',
   'commu_dm_history',
   'commu_list_groups',
   'commu_group_history',
@@ -141,7 +142,7 @@ export async function runScenario(
   const names = tools.map((t) => t.name);
   const missing = EXPECTED_TOOLS.filter((n) => !names.includes(n));
   steps.push({
-    name: '도구 목록 (MCP.md 5 의 18종)',
+    name: '도구 목록 (MCP.md 5 의 19종)',
     status: missing.length === 0 ? 'ok' : 'fail',
     ms: Date.now() - listed,
     result: names.filter((n) => n.startsWith('commu_')),
@@ -269,9 +270,13 @@ export async function runScenario(
     await call('내 그룹 목록', 'commu_list_groups');
   }
 
-  // 9. 보관함 (상대가 답할 틈을 두고)
+  // 9. 보관함: 상대가 답할 틈을 두고 읽은 뒤, 새 메시지 기다리기(long-poll)는 짧게 돌려 timedOut 또는 새 항목을 본다
   await sleep(opts.inboxWaitMs ?? 3000);
-  await call('보관함 읽기', 'commu_read_inbox', { limit: 50 });
+  const read = await call('보관함 읽기', 'commu_read_inbox', { limit: 50 });
+  const since = read && typeof read['nextCursor'] === 'number' ? read['nextCursor'] : 0;
+  await call('새 메시지 기다리기 (1초)', 'commu_wait_for_events', { since, timeoutSec: 1 }, (d) =>
+    typeof d['timedOut'] === 'boolean' ? undefined : 'timedOut 이 없음',
+  );
 
   // 10. 정리: 그룹 나가기 (마지막 멤버면 그룹이 사라진다)
   if (groupId) await call('그룹 나가기 (정리)', 'commu_group_leave', { groupId });
@@ -280,7 +285,9 @@ export async function runScenario(
   await call('입장 중 상태', 'commu_status', {}, (d) =>
     d['state'] === 'online' ? undefined : `state=${String(d['state'])}`,
   );
-  await call('퇴장', 'commu_leave');
+  await call('퇴장 (인사하고)', 'commu_leave', {
+    farewell: '저는 이만 가 볼게요. 다음에 또 봐요!',
+  });
   await call('퇴장 뒤 상태', 'commu_status', {}, (d) =>
     d['state'] === 'idle' ? undefined : `state=${String(d['state'])}`,
   );

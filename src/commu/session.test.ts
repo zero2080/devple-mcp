@@ -309,6 +309,71 @@ describe('CommuSession (MCP.md 3 수명 · 4 보관함, 가짜 Commu 서버)', (
     expect(session.status().moving).toBe(false);
   });
 
+  it('waitForInbox: 있으면 바로, 없으면 새 항목에 깨어나고, types 로 거르고, 퇴장하면 바로, 입장 전이면 자동 입장 (MCP.md 1.2)', async () => {
+    const session = newSession();
+    await session.enter();
+    const started = Date.now();
+    const waiting = session.waitForInbox({ since: 0, limit: 50, timeoutMs: 5000 });
+    setTimeout(() => fake.receiveDm('u2', '기다린 디엠'), 30);
+    const got = await waiting;
+    expect(got.timedOut).toBe(false);
+    expect(got.page.items.map((i) => i.type)).toEqual(['dm']);
+    expect(Date.now() - started).toBeLessThan(3000);
+
+    const again = await session.waitForInbox({ since: 0, limit: 50, timeoutMs: 5000 });
+    expect(again.timedOut).toBe(false);
+    expect(again.page.items).toHaveLength(1);
+
+    const none = await session.waitForInbox({
+      since: 0,
+      limit: 50,
+      types: ['group'],
+      timeoutMs: 50,
+    });
+    expect(none.timedOut).toBe(true);
+    expect(none.page.items).toEqual([]);
+    expect(none.waitedMs).toBeGreaterThanOrEqual(40);
+
+    const cursor = session.inbox.latestCursor;
+    const leaving = session.waitForInbox({ since: cursor, limit: 50, timeoutMs: 5000 });
+    setTimeout(() => void session.leave('tool'), 30);
+    const left = await leaving;
+    expect(left.timedOut).toBe(false);
+    expect(left.page.items).toEqual([]);
+    expect(session.state).toBe('idle');
+
+    const auto = await session.waitForInbox({ since: cursor, limit: 50, timeoutMs: 50 });
+    expect(session.state).toBe('online');
+    expect(auto.timedOut).toBe(true);
+  });
+
+  it('waitForInbox: ManualClock 으로 timeout 이 정확하고, 정지(ended)되면 다른 도구와 같은 오류', async () => {
+    const clock = new ManualClock();
+    const session = newSession({ clock });
+    await session.enter();
+    let settled = false;
+    const waiting = session.waitForInbox({ since: 0, limit: 50, timeoutMs: 20_000 }).finally(() => {
+      settled = true;
+    });
+    await new Promise((resolve) => setImmediate(resolve)); // 타이머가 등록된 뒤에 시계를 민다
+    await clock.advance(19_000);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+    await clock.advance(1_000);
+    const result = await waiting;
+    expect(result).toMatchObject({ timedOut: true, waitedMs: 20_000 });
+    expect(result.page.items).toEqual([]);
+  });
+
+  it('waitForInbox: 기다리는 중 정지(ended)되면 다른 도구와 같은 오류로 바로 끝난다', async () => {
+    const live = newSession();
+    await live.enter();
+    const suspended = live.waitForInbox({ since: 0, limit: 50, timeoutMs: 5000 });
+    fake.suspend();
+    await expect(suspended).rejects.toBeInstanceOf(CommuEndedError);
+    expect(live.state).toBe('ended');
+  });
+
   it('접근 토큰은 expiresIn 의 80% 가 지나면 다시 교환하고, 401 AUTH_REQUIRED 면 한 번 재교환한다', async () => {
     const clock = new ManualClock();
     const session = newSession({ clock });

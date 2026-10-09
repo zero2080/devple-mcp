@@ -63,6 +63,8 @@ describe('E2E 시나리오 (가짜 Commu 서버)', () => {
     expect(names).toContain('상대 옆으로 이동 (u2)');
     expect(names).toContain('DM 보내기');
     expect(names).toContain('그룹에 초대');
+    expect(names).toContain('새 메시지 기다리기 (1초)');
+    expect(names).toContain('퇴장 (인사하고)');
     expect(names[names.length - 1]).toBe('퇴장 뒤 상태');
     await waitUntil(() => fake.streamCount === 0);
 

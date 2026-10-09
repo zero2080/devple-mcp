@@ -71,6 +71,44 @@ describe('Inbox (MCP.md 4)', () => {
     expect(page.hasMore).toBe(false);
   });
 
+  it('read 는 types 로 종류를 거르고, recentPublic 은 since 뒤만, subscribe 는 새 항목마다 불린다 (MCP.md 1.2)', () => {
+    const inbox = new Inbox({ now: () => 0 });
+    inbox.myUserId = 'u1';
+    let notified = 0;
+    const off = inbox.subscribe(() => {
+      notified++;
+    });
+    const pub = (i: number, content: string) =>
+      env(i, 'chat.public', {
+        ...msg(`p${String(i)}`, 'u2', content),
+        kind: 'public',
+        position: { mapId: 'main', x: 1, y: 1, dir: 'down' },
+        sender: { nickname: '도트', kind: 'human' },
+      });
+    inbox.ingest(pub(1, '하나'));
+    inbox.ingest(
+      env(2, 'chat.dm', {
+        ...msg('m2', 'u3', '디엠'),
+        kind: 'dm',
+        conversationId: 'c_u3',
+        sender: user('u3', '멀리'),
+        peerId: 'u1',
+      }),
+    );
+    inbox.ingest(pub(3, '셋'));
+    expect(notified).toBe(3);
+    const publicOnly = inbox.read(0, 50, ['public']);
+    expect(publicOnly.items.map((i) => i.cursor)).toEqual([1, 3]);
+    expect(publicOnly.nextCursor).toBe(3);
+    expect(inbox.unread()).toEqual({ dm: 1, group: 0 }); // 건너뛴 DM 은 남아 있다
+    expect(inbox.read(0, 50, ['dm']).items.map((i) => i.cursor)).toEqual([2]);
+    expect(inbox.recentPublic(20, 1).map((i) => i.cursor)).toEqual([3]);
+    expect(inbox.recentPublic(20, 3)).toEqual([]);
+    off();
+    inbox.ingest(pub(4, '넷'));
+    expect(notified).toBe(3);
+  });
+
   it('내 에코·버퍼 밖 타입·중복 이벤트는 넣지 않는다', () => {
     const inbox = new Inbox();
     inbox.myUserId = 'u1';

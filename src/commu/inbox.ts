@@ -105,6 +105,7 @@ export class Inbox {
   private items: InboxItem[] = [];
   private seq = 0;
   private readonly seenEventIds = new Set<string>();
+  private readonly listeners = new Set<() => void>();
   private readonly capacity: number;
   private readonly now: () => number;
 
@@ -133,13 +134,27 @@ export class Inbox {
       for (const old of this.items.splice(0, excess)) this.seenEventIds.delete(old.eventId);
       this.dropped += excess;
     }
+    for (const listener of this.listeners) listener();
     return item;
   }
 
-  /** since 이후를 limit 만큼. 돌려준 항목은 delivered 로 표시한다 (안 읽음 수에서 빠짐) */
-  read(since = 0, limit = 50): InboxPage {
+  /** 새 항목이 들어올 때마다 불린다 (commu_wait_for_events). 돌려주는 함수로 해제 */
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  /**
+   * since 이후를 limit 만큼. 돌려준 항목은 delivered 로 표시한다 (안 읽음 수에서 빠짐).
+   * types 를 주면 그 종류만 — 건너뛴 다른 종류는 그대로 남고, nextCursor 는 마지막으로 돌려준 항목이다
+   */
+  read(since = 0, limit = 50, types?: readonly InboxItem['type'][]): InboxPage {
     const max = Math.max(1, Math.min(limit, 50));
-    const matched = this.items.filter((e) => e.cursor > since);
+    const matched = this.items.filter(
+      (e) => e.cursor > since && (types === undefined || types.includes(e.type)),
+    );
     const items = matched.slice(0, max);
     for (const item of items) item.delivered = true;
     const last = items[items.length - 1];
@@ -163,9 +178,11 @@ export class Inbox {
     return { dm, group };
   }
 
-  /** 최근 들은 근접 대화 (look_around) */
-  recentPublic(limit = 20): PublicItem[] {
-    return this.items.filter((e): e is PublicItem => e.type === 'public').slice(-limit);
+  /** 최근 들은 근접 대화 (look_around). since 뒤의 것만 (MCP.md 1.2 — 같은 옛 대화를 되풀이하지 않게) */
+  recentPublic(limit = 20, since = 0): PublicItem[] {
+    return this.items
+      .filter((e): e is PublicItem => e.type === 'public' && e.cursor > since)
+      .slice(-limit);
   }
 
   clear(): void {
