@@ -13,8 +13,8 @@ export const serverConfigSchema = z.object({
   maxGroupMembers: z.number().int().positive(),
   avatarOptions: avatarOptionsSchema,
   // DOMAIN 2.7 3.6. 서버 2.9 배포 전에는 안 오므로 기본 2 (하위 호환 — 서버가 보내면 그 값)
-  maxAiPerMember: z.number().int().positive().default(2),
-  maxTokensPerAi: z.number().int().positive().default(2),
+  maxAiPerMember: z.number().int().positive(),
+  maxTokensPerAi: z.number().int().positive(),
 });
 
 export const authSessionSchema = z.object({
