@@ -106,6 +106,8 @@ export class CommuSession {
   /** 행동 도구·이동을 호출 순서대로 하나씩 (위치 경쟁 방지, ARCHITECTURE 6) */
   private actions: Promise<unknown> = Promise.resolve();
   private moving: Promise<unknown> | null = null;
+  /** commu_wait_for_events 가 기다리는 중 — 보관함 도착·퇴장·종료 때 깨운다 */
+  private readonly wakers = new Set<() => void>();
   private idleTimer: ClockTimer | null = null;
   private idleDeadline: number | null = null;
   private lastSeq = 0;
@@ -151,6 +153,7 @@ export class CommuSession {
       capacity: deps.inboxCapacity ?? 500,
       now: () => this.clock.now(),
     });
+    this.inbox.subscribe(() => this.wake());
   }
 
   get me(): Me | null {
@@ -273,6 +276,54 @@ export class CommuSession {
       await this.enter();
       return fn();
     }
+  }
+
+  /**
+   * commu_wait_for_events (MCP.md 1.2): since 뒤의 보관함 항목(types 로 종류 제한)이 있으면 바로, 없으면 새 항목이
+   * 올 때까지 최대 timeoutMs 기다린다. 입장돼 있지 않으면 자동 입장(들으려면 SSE 가 있어야 한다). 행동 FIFO 를 거치지 않아
+   * 기다리는 동안 다른 도구가 막히지 않는다. 기다리는 중 퇴장·종료되면 바로 돌아온다(종료는 다른 도구와 같은 오류)
+   */
+  async waitForInbox(opts: {
+    since: number;
+    limit: number;
+    types?: readonly InboxItem['type'][];
+    timeoutMs: number;
+  }): Promise<{ page: ReturnType<Inbox['read']>; timedOut: boolean; waitedMs: number }> {
+    await this.ensureOnline();
+    const started = this.clock.now();
+    const deadline = started + Math.max(0, opts.timeoutMs);
+    for (;;) {
+      const page = this.inbox.read(opts.since, opts.limit, opts.types);
+      if (page.items.length > 0)
+        return { page, timedOut: false, waitedMs: this.clock.now() - started };
+      if (this.auth.ended) throw new CommuEndedError(this.auth.ended);
+      const remaining = deadline - this.clock.now();
+      if (!this.online || remaining <= 0) {
+        return { page, timedOut: remaining <= 0, waitedMs: this.clock.now() - started };
+      }
+      await this.sleepUntilWoken(remaining);
+      this.touch();
+    }
+  }
+
+  /** 보관함 도착·퇴장·종료로 깨어나거나 ms 가 지나면 돌아온다 */
+  private sleepUntilWoken(ms: number): Promise<void> {
+    return new Promise<void>((resolve) => {
+      const timer = this.clock.setTimeout(() => {
+        this.wakers.delete(waker);
+        resolve();
+      }, ms);
+      const waker = () => {
+        timer.cancel();
+        this.wakers.delete(waker);
+        resolve();
+      };
+      this.wakers.add(waker);
+    });
+  }
+
+  private wake(): void {
+    for (const waker of [...this.wakers]) waker();
   }
 
   /** 행동 도구용: 입장돼 있지 않으면 자동 입장 */
@@ -463,6 +514,7 @@ export class CommuSession {
     this.world.clear();
     if (this.state === 'leaving') this.state = 'idle';
     log.info(`left Commu (${reason})`);
+    this.wake();
   }
 
   /** MCP.md 3.4: 정지·토큰 폐기 → 복구 없이 ended. SSE 도 닫는다 (서버가 이미 닫았을 수도) */
@@ -473,6 +525,7 @@ export class CommuSession {
     this.sse = null;
     void sse?.close();
     log.warn(`session ended: ${reason}`);
+    this.wake();
   }
 
   private armIdle(): void {

@@ -73,14 +73,34 @@ export function registerLifecycleTools(server: McpServer, session: CommuSession)
     {
       title: 'Commu 퇴장',
       description:
-        '월드에서 나간다 (SSE 종료, 서버가 잠시 뒤 퇴장 처리). 받은 메시지 보관함은 유지된다. 다음 행동 도구 호출 때 자동으로 다시 입장한다.',
-      outputSchema: z.object({ left: z.literal(true) }),
+        '월드에서 나간다 (SSE 종료, 서버가 잠시 뒤 퇴장 처리). 받은 메시지 보관함은 유지된다. 다음 행동 도구 호출 때 자동으로 다시 입장한다. ' +
+        'farewell 을 주면 나가기 전에 근접 대화로 한마디 한다(입장 중일 때만) — 머물겠다고 말했으면 인사 없이 사라지지 않는다.',
+      inputSchema: z.object({
+        farewell: z
+          .string()
+          .min(1)
+          .max(200)
+          .optional()
+          .describe('나가기 전 근접 대화 한마디 (입장 중일 때만 보낸다)'),
+      }),
+      outputSchema: z.object({
+        left: z.literal(true),
+        /** farewell 을 들었을 사람 수 (보냈을 때만) */
+        farewellHeardBy: z.number().int().optional(),
+      }),
       annotations: { idempotentHint: true },
     },
-    () =>
+    ({ farewell }) =>
       runTool(session, async () => {
+        let farewellHeardBy: number | undefined;
+        if (farewell !== undefined && session.online) {
+          farewellHeardBy = (await session.say(farewell)).heardBy.length;
+        }
         await session.leave('tool');
-        return { left: true as const };
+        return {
+          left: true as const,
+          ...(farewellHeardBy !== undefined ? { farewellHeardBy } : {}),
+        };
       }),
   );
 

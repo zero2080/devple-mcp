@@ -18,6 +18,7 @@ const READ_TOOLS = [
   'commu_list_groups',
   'commu_group_history',
   'commu_get_appearance',
+  'commu_wait_for_events',
 ];
 
 /** C3 행동 도구 7종 + C4 이동 (MCP.md 5.3) */
@@ -114,7 +115,7 @@ describe('commu_* 도구 (MCP 클라이언트 → 서버 → 가짜 Commu)', () 
     await close();
   });
 
-  it('수명 3종·읽기 7종(외형 조회 포함)·행동 8종(이동 포함) = 18종이 있고, 바뀐 임시 도구는 없다', async () => {
+  it('수명 3종·읽기 8종(외형 조회·기다리기 포함)·행동 8종(이동 포함) = 19종이 있고, 바뀐 임시 도구는 없다', async () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name);
     expect(names).toEqual(
@@ -146,7 +147,10 @@ describe('commu_* 도구 (MCP 클라이언트 → 서버 → 가짜 Commu)', () 
     ]) {
       expect(names).not.toContain(gone);
     }
-    for (const name of READ_TOOLS.filter((n) => n !== 'commu_read_inbox')) {
+    // read_inbox·wait_for_events 는 읽음 처리를 하고(wait 는 자동 입장도) readOnly 가 아니다
+    for (const name of READ_TOOLS.filter(
+      (n) => n !== 'commu_read_inbox' && n !== 'commu_wait_for_events',
+    )) {
       expect(tools.find((t) => t.name === name)?.annotations?.readOnlyHint).toBe(true);
     }
     const { resources } = await client.listResources();
@@ -579,6 +583,78 @@ describe('commu_* 도구 (MCP 클라이언트 → 서버 → 가짜 Commu)', () 
     const say = await call('commu_say', { content: '다시 왔어요' });
     expect(say.result.isError).toBeFalsy();
     expect((await call('commu_status')).data).toMatchObject({ state: 'online' });
+  });
+
+  it('commu_wait_for_events 는 새 메시지가 오면 바로 돌아오고(읽음 처리), 없으면 timedOut, types 로 거르고, 퇴장 뒤엔 자동 입장한다 (MCP.md 1.2)', async () => {
+    const latest = session.inbox.latestCursor;
+    const waiting = call('commu_wait_for_events', { since: latest, timeoutSec: 5 });
+    setTimeout(() => fake.receiveDm('u2', '기다리던 디엠'), 50);
+    const got = await waiting;
+    expect(got.result.isError, textOf(got.result)).toBeFalsy();
+    expect(got.data).toMatchObject({
+      timedOut: false,
+      state: 'online',
+      markedRead: { dm: 1, group: 0 },
+    });
+    expect((got.data['items'] as Structured[]).map((i) => i['type'])).toEqual(['dm']);
+    expect(got.data['waitedMs'] as number).toBeLessThan(3000);
+    const next = got.data['nextCursor'] as number;
+
+    const empty = await call('commu_wait_for_events', {
+      since: next,
+      timeoutSec: 1,
+      types: ['group'],
+    });
+    expect(empty.data).toMatchObject({ timedOut: true, items: [], nextCursor: next });
+    expect(empty.data['waitedMs'] as number).toBeGreaterThanOrEqual(900);
+
+    await call('commu_leave');
+    await waitUntil(() => fake.streamCount === 0);
+    const auto = await call('commu_wait_for_events', { since: next, timeoutSec: 1 });
+    expect(auto.data).toMatchObject({ state: 'online', timedOut: true });
+    expect(fake.streamCount).toBe(1);
+  });
+
+  it('commu_look_around 는 since 뒤에 들은 근접 대화만 주고 latestCursor 를 돌려준다 (MCP.md 1.2)', async () => {
+    const first = await call('commu_look_around');
+    const latest = first.data['latestCursor'] as number;
+    const heardBefore = (first.data['heard'] as Structured[]).length;
+    expect(heardBefore).toBeGreaterThanOrEqual(1);
+    expect((await call('commu_look_around', { since: latest })).data).toMatchObject({
+      heard: [],
+      latestCursor: latest,
+    });
+    fake.emit('chat.public', {
+      kind: 'public',
+      id: 'p-since',
+      senderId: 'u2',
+      content: '새로 들은 말',
+      links: [],
+      createdAt: Date.now(),
+      position: { mapId: 'main', x: 23, y: 15, dir: 'left' },
+      sender: { nickname: '도트', kind: 'human' },
+    });
+    await waitUntil(() => session.inbox.latestCursor > latest);
+    const next = await call('commu_look_around', { since: latest });
+    expect((next.data['heard'] as Structured[]).map((h) => h['messageId'])).toEqual(['p-since']);
+    expect(next.data['latestCursor']).toBe(latest + 1);
+    expect((await call('commu_look_around')).data['heard']).toHaveLength(heardBefore + 1);
+  });
+
+  it('commu_leave { farewell } 는 나가기 전에 근접 대화로 한마디 하고, 입장 전이면 보내지 않는다 (MCP.md 1.2)', async () => {
+    const posts = callsTo('POST', '/chat/public');
+    const bye = await call('commu_leave', { farewell: '저는 이만 가 볼게요' });
+    expect(bye.data['left']).toBe(true);
+    expect(bye.data['farewellHeardBy'] as number).toBeGreaterThanOrEqual(1);
+    expect(callsTo('POST', '/chat/public')).toBe(posts + 1);
+    expect((fake.calls.at(-1)?.body as Structured | undefined)?.['content']).toBe(
+      '저는 이만 가 볼게요',
+    );
+    await waitUntil(() => fake.streamCount === 0);
+    expect((await call('commu_status')).data).toMatchObject({ state: 'idle' });
+    const silent = await call('commu_leave', { farewell: '또 봐요' });
+    expect(silent.data).toEqual({ left: true });
+    expect(callsTo('POST', '/chat/public')).toBe(posts + 1);
   });
 
   it('토큰이 없으면 서버는 뜨고 commu_* 도구는 안내 오류를 돌려준다 (MCP.md 2)', async () => {
