@@ -2,7 +2,7 @@
 import { z } from 'zod';
 
 import { appearanceSchema } from './appearance.js';
-import { epochMs, userKindCompat } from './common.js';
+import { epochMs, userKindSchema } from './common.js';
 import { positionSchema } from './world.js';
 
 export const userRoleSchema = z.enum(['member', 'admin']);
@@ -13,7 +13,7 @@ export const userSchema = z.object({
   nickname: z.string(),
   appearance: appearanceSchema,
   statusMessage: z.string().optional(),
-  kind: userKindCompat,
+  kind: userKindSchema,
   ownerId: z.string().optional(), // kind='ai'일 때만
   role: userRoleSchema,
   status: userStatusSchema,

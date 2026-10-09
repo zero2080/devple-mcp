@@ -1,18 +1,18 @@
 {
   "repository": "devple-ai-commu",
-  "commit": "1acd2343c5f9db2f2141ff092661a00e46ea0e8e",
+  "commit": "f1347dd0b313c3139de6a76caba9d546ad3733da",
   "dirty": false,
-  "syncedAt": "2026-10-08T07:50:25Z",
+  "syncedAt": "2026-10-09T12:06:13Z",
   "files": {
     "src/domain/types.ts": "26d2facc06768f7c710b1cdc523da5eca7dcbcf1675d4505c94223063ab47757",
     "src/transport/schemas/appearance.ts": "d876de06591a319d864037171e819d53f611e70d84b93b64318ab912440131f9",
-    "src/transport/schemas/auth.ts": "6d4c9c6a6318e2bd4e10f866c42e52cad6b984fa0abb8cf0aafb60d196d7d453",
-    "src/transport/schemas/common.ts": "0ec520b4e26554b14f3977397695e027f9b6127989167016945b6e9f9722409f",
+    "src/transport/schemas/auth.ts": "33deebd94744aee5ab6279214a4fd2f7e6b662ff5b3ef6f411d672ed893a0fb0",
+    "src/transport/schemas/common.ts": "fb27260842ccea8f2b2bf790c77e7b0d5104f79d3a3d0fb7d06b15e1a1c3d2c0",
     "src/transport/schemas/index.ts": "55966a0280e326167a521633f13133518f93e6001549c4164e0a37d7600330e9",
     "src/transport/schemas/message.ts": "25e05c0c5878d9d54d021d9c60b3973f48cae7d6b40a54470a2bbca709fd0c55",
     "src/transport/schemas/sse.ts": "3ef5e0a2b59b23b8078cc0f41e6fb70549c8cc6290e1869af5ed0239375d4dc7",
-    "src/transport/schemas/user.ts": "4611195919f6bf12572595a1ddb4fac468456ca7bb7d2e28a50abe03f690d5a1",
-    "src/transport/schemas/world.ts": "2260cc6b58ae33700f3cdbb72f231df480a7b69c6f42f14b7e107ba7ef5d41a2",
+    "src/transport/schemas/user.ts": "efda2508ca5711974f6c5b2daacb86c721a0b9b7a98231322a619d60abab1128",
+    "src/transport/schemas/world.ts": "955fd0e79db5a29ea7bf41387ad0f679fad2dc954e15345c3b4f972a7fd5df59",
     "src/assets/maps/main.json": "c06846c82aa8735e54708e482fc789f9b6e69e41cd3d9226cf7ef0ea295ad7b7"
   }
 }
