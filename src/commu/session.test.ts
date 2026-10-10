@@ -1,6 +1,12 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
-import { FakeCommu, SPAWN, TEST_AI_TOKEN, waitUntil } from '../test/fake-commu.js';
+import {
+  FakeCommu,
+  GROUND_CHUNK_SIZE,
+  SPAWN,
+  TEST_AI_TOKEN,
+  waitUntil,
+} from '../test/fake-commu.js';
 import { ManualClock } from './clock.js';
 import type { CommuConfig } from './config.js';
 import { CommuApiError, CommuEndedError } from './errors.js';
@@ -471,5 +477,139 @@ describe('CommuSession (MCP.md 3 수명 · 4 보관함, 가짜 Commu 서버)', (
     fake.emit('presence.left', { userId: 'u7' });
     await waitUntil(() => session.world.size === 4);
     expect(session.inbox.size).toBe(0); // presence·sync 는 보관함에 없다
+  });
+});
+
+describe('CommuSession — 지상 월드 (MCP.md 3.2·5.3, W6)', () => {
+  const SIZE = GROUND_CHUNK_SIZE;
+  /** 청크 (cx, cy): 전부 '.' (walk) */
+  const chunk = (cx: number, cy: number) => ({
+    cx,
+    cy,
+    rows: Array<string>(SIZE).fill('.'.repeat(SIZE)),
+    places: [],
+    concept: 'test',
+    version: 1,
+  });
+  const square = (r: number) =>
+    Array.from({ length: (2 * r + 1) ** 2 }, (_, i) =>
+      chunk((i % (2 * r + 1)) - r, Math.floor(i / (2 * r + 1)) - r),
+    );
+  let fake: FakeCommu;
+  const sessions: CommuSession[] = [];
+
+  async function startFake(opts: ConstructorParameters<typeof FakeCommu>[0]): Promise<CommuConfig> {
+    fake = new FakeCommu(opts);
+    await fake.start();
+    return {
+      enabled: true,
+      aiToken: TEST_AI_TOKEN,
+      baseUrl: fake.origin,
+      apiBaseUrl: fake.baseUrl,
+      idleMinutes: 10,
+    };
+  }
+  const session = (config: CommuConfig) => {
+    const s = new CommuSession(config, { move: { tileMs: 0, batchMs: 0 } });
+    sessions.push(s);
+    return s;
+  };
+  const chunkCalls = () => fake.calls.filter((c) => c.path === '/world/world/chunks');
+  const puts = () => fake.calls.filter((c) => c.method === 'PUT' && c.path === '/me/position');
+
+  afterEach(async () => {
+    for (const s of sessions.splice(0)) await s.leave('shutdown');
+    await fake.stop();
+  });
+
+  it('입장하면 mapId world, 전체 접속자 수는 서버 값(스냅샷·하트비트) — 퇴장하면 청크 캐시를 비운다', async () => {
+    const config = await startFake({
+      ground: { chunks: square(2), spawn: { x: 16, y: 20 } },
+      others: [{ id: 'u2', nickname: '도트', online: true, position: { x: 18, y: 20 } }],
+    });
+    const s = session(config);
+    const status = await s.enter();
+    expect(status).toMatchObject({ mapId: 'world', position: { x: 16, y: 20 }, onlineCount: 2 });
+    expect(s.groundWorld).toBe(true);
+    fake.heartbeat(7);
+    await waitUntil(() => s.status().onlineCount === 7);
+    await s.moveTo({ x: 15, y: 20 });
+    expect(s.chunks.size).toBeGreaterThan(0);
+    await s.leave();
+    expect(s.chunks.size).toBe(0);
+  });
+
+  it('이동: 시야 청크를 한 번 받아 음수 좌표로 경계를 넘어 걷고, 같은 곳에서는 다시 받지 않는다', async () => {
+    const config = await startFake({ ground: { chunks: square(2), spawn: { x: 16, y: 20 } } });
+    const s = session(config);
+    await s.enter();
+
+    const first = await s.moveTo({ x: -3, y: 20 });
+    expect(first).toMatchObject({ status: 'arrived', position: { mapId: 'world', x: -3, y: 20 } });
+    expect(chunkCalls()).toHaveLength(1);
+    expect(chunkCalls()[0]?.query).toEqual({ cx: '0', cy: '0', r: '2' });
+    expect(puts().every((c) => (c.body as { mapId: string }).mapId === 'world')).toBe(true);
+
+    // 내 청크가 −1 이 되면 시야 정사각형 서쪽 끝(−3)이 비어 다시 받는다 — 사본 밖이라 준비 중
+    await s.moveTo({ x: -6, y: 20 });
+    expect(chunkCalls()).toHaveLength(2);
+    expect(chunkCalls()[1]?.query).toEqual({ cx: '-1', cy: '0', r: '2' });
+    // 준비 중은 5초 안에는 다시 묻지 않는다
+    await s.moveTo({ x: -4, y: 20 });
+    expect(chunkCalls()).toHaveLength(2);
+  });
+
+  it('준비되지 않은 청크로는 걷지 않고 blocked(not_ready) — world.chunk 로 준비되면 간다', async () => {
+    const config = await startFake({
+      ground: {
+        chunks: square(2),
+        ready: square(2).filter((c) => !(c.cx === 1 && c.cy === 0)),
+        spawn: { x: 16, y: 20 },
+      },
+    });
+    const s = session(config);
+    await s.enter();
+    const before = puts().length;
+
+    expect(await s.moveTo({ x: 40, y: 20 })).toMatchObject({
+      status: 'blocked',
+      reason: 'not_ready',
+      requests: 0,
+    });
+    expect(puts()).toHaveLength(before);
+
+    fake.revealChunk(1, 0);
+    await waitUntil(() => s.chunks.get(1, 0) !== undefined);
+    expect(await s.moveTo({ x: 40, y: 20 })).toMatchObject({ status: 'arrived' });
+  });
+
+  it('서버가 409 not_ready 면 그 청크를 잊고(벽) 멈추고, 다음 이동이 다시 받아 간다', async () => {
+    const config = await startFake({ ground: { chunks: square(2), spawn: { x: 16, y: 20 } } });
+    const s = session(config);
+    await s.enter();
+    await s.moveTo({ x: 17, y: 20 });
+    fake.rejectPositions('not_ready', 1);
+
+    const rejected = await s.moveTo({ x: 20, y: 20 });
+    expect(rejected).toMatchObject({
+      status: 'blocked',
+      rejections: 1,
+      position: { x: 17, y: 20 },
+    });
+    expect(s.chunks.get(0, 0)).toBeUndefined();
+    const calls = chunkCalls().length;
+
+    expect(await s.moveTo({ x: 20, y: 20 })).toMatchObject({ status: 'arrived' });
+    expect(chunkCalls()).toHaveLength(calls + 1);
+  });
+
+  it('서버 chunkSize 가 지형 자산과 다르면 걷지 않고 알려 준다', async () => {
+    const config = await startFake({
+      ground: { chunks: square(1), spawn: { x: 16, y: 20 } },
+      config: { chunkSize: 16 },
+    });
+    const s = session(config);
+    await s.enter();
+    await expect(s.moveTo({ x: 17, y: 20 })).rejects.toThrow(/chunkSize/);
   });
 });

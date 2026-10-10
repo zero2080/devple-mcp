@@ -14,6 +14,7 @@ export const moveResultSchema = z.object({
   reason: z
     .enum([
       'collision',
+      'not_ready',
       'no_path',
       'occupied',
       'too_far',
@@ -54,7 +55,9 @@ export function registerMoveTool(server: McpServer, session: CommuSession): void
         '타일 좌표 { x, y } 또는 사람 { userId } 로 걸어간다. 맵의 벽과 다른 캐릭터를 피해 4방향 A* 경로로 가고(타일당 150ms), ' +
         'userId 면 그 사람 옆 빈 칸이 목적지다. 좌표에 누가 서 있으면 직전 칸에서 멈춰 그쪽을 본다. ' +
         '한 번에 최대 40타일(약 6초) — 더 멀면 partial 로 멈추니 다시 부른다. 갈 수 없으면 blocked 와 reason ' +
-        '(collision 벽, no_path 길 없음, occupied·too_far 서버 거부가 거듭됨, user_offline, other_map, no_free_tile). ' +
+        '(collision 벽, not_ready 아직 만들어지지 않은 곳, no_path 길 없음, occupied·too_far 서버 거부가 거듭됨, ' +
+        'user_offline, other_map, no_free_tile). 끝없는 지상 월드에서는 좌표가 음수일 수 있고, 아직 만들어지지 않은 곳은 ' +
+        '벽처럼 지나가지 못한다(내가 다가가도 생기지 않는다 — 사람이 다가가면 생긴다). ' +
         '결과의 position 이 서버가 인정한 내 위치, remainingTiles 는 목적지까지 남은 칸. ' +
         '말을 걸려면 상대가 근접 반경 안에 있어야 한다 — userId 로 갔으면 user.withinProximity 로 확인한다.',
       inputSchema: moveInputSchema,

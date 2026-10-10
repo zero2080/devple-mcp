@@ -1,10 +1,12 @@
 // commu_move_to 실행기 (MCP.md 5.3, ARCHITECTURE 6). 경로는 pathfinding.ts(A*), 걷기는 가상 시계로 타일당 150ms 를 흉내 내며
 // 200ms 마다 현재 위치를 PUT /me/position 으로 보낸다 (프론트 positionBatcher 와 같은 배칭, seq = Date.now()).
 // 한 요청에 담는 타일은 최대 3 — 서버 검증 max(3, elapsedMs/100) 을 어떤 타이밍에도 넘지 않는다 (API_CONTRACT 2.2).
+// 땅은 Ground 로만 읽는다 (옛 맵 collision 또는 지상 월드 청크 — ground.ts, W6).
 import type { Clock } from './clock.js';
 import { CommuApiError } from './errors.js';
-import { directionTo, isBlocked, type MapGrid } from './map.js';
-import { createPathGrid, findPath, isSameTile, manhattan } from './pathfinding.js';
+import type { Ground } from './ground.js';
+import { directionTo } from './map.js';
+import { createAreaPathGrid, findPath, isSameTile, manhattan } from './pathfinding.js';
 import {
   positionRejectedDetailsSchema,
   type Direction,
@@ -24,7 +26,14 @@ export const MAX_REPLANS = 3;
 
 export type MoveStatus = 'arrived' | 'blocked' | 'partial';
 export type BlockedReason =
-  'collision' | 'no_path' | 'occupied' | 'too_far' | 'user_offline' | 'other_map' | 'no_free_tile';
+  | 'collision'
+  | 'not_ready'
+  | 'no_path'
+  | 'occupied'
+  | 'too_far'
+  | 'user_offline'
+  | 'other_map'
+  | 'no_free_tile';
 
 export interface MoveResult {
   status: MoveStatus;
@@ -49,7 +58,8 @@ export interface MoveResult {
 
 export interface MoverDeps {
   clock: Clock;
-  map: MapGrid;
+  /** 지금의 땅 (부를 때마다 — 지상 월드는 청크 캐시가 바뀐다) */
+  ground(): Ground;
   /** 내 타일을 제외한 현재 점유 타일 (부를 때마다 최신 월드) */
   occupied(): TilePoint[];
   putPosition(body: Position & { seq: number }): Promise<void>;
@@ -57,6 +67,8 @@ export interface MoverDeps {
   nextSeq(): number;
   /** 서버가 인정한 위치를 월드에 반영 */
   onAccepted(position: Position): void;
+  /** 409 not_ready: 그 칸의 청크를 준비되지 않은 것으로 (다시 받을 때까지 벽 — MCP.md 5.3) */
+  onNotReady?(tile: TilePoint): void;
   tileMs?: number;
   batchMs?: number;
   maxTiles?: number;
@@ -94,7 +106,6 @@ export class Mover {
    * (프론트 3.2.1). 길이 없으면 blocked(no_path). maxTiles 를 넘으면 partial.
    */
   async run(from: Position, target: TilePoint, options: MoveOptions = {}): Promise<MoveResult> {
-    const { map } = this.deps;
     const mapId = from.mapId;
     const avoid: TilePoint[] = [];
     let acked: Position = from;
@@ -116,10 +127,17 @@ export class Mover {
       replans,
     });
 
-    if (isBlocked(map, target)) return result('blocked', target, 'collision');
+    const ground = this.deps.ground();
+    if (ground.isWall(target)) return result('blocked', target, ground.wallReason(target));
 
     const plan = (start: TilePoint): Route | null => {
-      const grid = createPathGrid(map, this.deps.occupied(), avoid);
+      const ground = this.deps.ground();
+      const grid = createAreaPathGrid(
+        ground,
+        ground.searchArea(start, target),
+        this.deps.occupied(),
+        avoid,
+      );
       const goalOccupied = grid.isOccupied(target) && !isSameTile(target, start);
       const search = findPath(grid, start, target, { allowGoalOccupied: goalOccupied });
       if (!search.reachable) return null;
@@ -204,6 +222,7 @@ export class Mover {
       unsent = 0;
       nextSendAt = this.deps.clock.now() + this.batchMs;
       if (rejected.reason === 'occupied' || rejected.reason === 'collision') avoid.push(position);
+      if (rejected.reason === 'not_ready') this.deps.onNotReady?.(position);
       const blocked = replan(rejected.reason);
       if (blocked) return blocked;
     }

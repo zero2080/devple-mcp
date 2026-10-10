@@ -1,12 +1,13 @@
 // A* 경로 탐색 (MCP.md 5.3): 4방향, 맨해튼 휴리스틱 — 프론트 src/domain/pathfinding.ts 와 같은 규칙·같은 순서
 // (ARCHITECTURE 3.2.1: 벽 + 다른 캐릭터가 선 타일이 차단, 목적지가 점유돼 있으면 호출자가 직전 타일까지로 줄인다).
-import { isBlocked, type MapGrid } from './map.js';
+// 탐색은 사각형 범위(TileRect) 안에서만 한다 — 옛 맵은 맵 전체, 지상 월드는 출발·목적지 주변 (음수 좌표 가능, ground.ts)
+import { mapGround, type Ground, type TileRect } from './ground.js';
+import type { MapGrid } from './map.js';
 import type { Direction } from './schemas.js';
 import type { TilePoint } from './world.js';
 
-export interface PathGrid {
-  width: number;
-  height: number;
+/** 탐색 범위 + 판정. 범위 밖 칸은 지나가지 않는다 */
+export interface PathGrid extends TileRect {
   isWall(p: TilePoint): boolean;
   isOccupied(p: TilePoint): boolean;
 }
@@ -28,24 +29,46 @@ export function isSameTile(a: TilePoint, b: TilePoint): boolean {
 }
 
 /**
- * 맵 + 점유 타일(내 타일 제외)로 탐색 격자를 만든다.
- * avoid 는 서버가 409 로 알려 준 타일 — 월드가 아직 모르는 점유(occupied)나 맵 자산과 다른 벽(collision)
+ * 땅 + 탐색 범위 + 점유 타일(내 타일 제외)로 탐색 격자를 만든다. 범위 밖 점유는 보지 않는다.
+ * avoid 는 서버가 409 로 알려 준 타일 — 월드가 아직 모르는 점유(occupied)나 땅 사본과 다른 벽(collision)
  */
+export function createAreaPathGrid(
+  ground: Ground,
+  area: TileRect,
+  occupied: Iterable<TilePoint>,
+  avoid: Iterable<TilePoint> = [],
+): PathGrid {
+  const { x0, y0, width, height } = area;
+  const inside = (p: TilePoint): boolean =>
+    p.x >= x0 && p.y >= y0 && p.x < x0 + width && p.y < y0 + height;
+  const key = (p: TilePoint) => (p.y - y0) * width + (p.x - x0);
+  const taken = new Set<number>();
+  for (const p of [...occupied, ...avoid]) {
+    if (inside(p)) taken.add(key(p));
+  }
+  return {
+    x0,
+    y0,
+    width,
+    height,
+    isWall: (p) => ground.isWall(p),
+    isOccupied: (p) => inside(p) && taken.has(key(p)),
+  };
+}
+
+/** 옛 맵 전체를 범위로 하는 탐색 격자 */
 export function createPathGrid(
   map: MapGrid,
   occupied: Iterable<TilePoint>,
   avoid: Iterable<TilePoint> = [],
 ): PathGrid {
-  const key = (p: TilePoint) => p.y * map.width + p.x;
-  const taken = new Set<number>();
-  for (const p of occupied) taken.add(key(p));
-  for (const p of avoid) taken.add(key(p));
-  return {
-    width: map.width,
-    height: map.height,
-    isWall: (p) => isBlocked(map, p),
-    isOccupied: (p) => taken.has(key(p)),
-  };
+  const ground = mapGround(map);
+  return createAreaPathGrid(
+    ground,
+    ground.searchArea({ x: 0, y: 0 }, { x: 0, y: 0 }),
+    occupied,
+    avoid,
+  );
 }
 
 export interface PathSearch {
@@ -73,7 +96,7 @@ export function findPath(
   options: { allowGoalOccupied?: boolean; maxExpansions?: number } = {},
 ): PathSearch {
   if (isSameTile(from, to)) return { path: [], reachable: true };
-  const { width, height } = grid;
+  const { x0, y0, width, height } = grid;
   const maxExpansions = options.maxExpansions ?? width * height;
   const blocked = (p: TilePoint): boolean => {
     if (grid.isWall(p)) return true;
@@ -83,7 +106,7 @@ export function findPath(
 
   const nodes = new Map<number, SearchNode>();
   const nodeAt = (x: number, y: number): SearchNode => {
-    const key = y * width + x;
+    const key = (y - y0) * width + (x - x0);
     let node = nodes.get(key);
     if (node === undefined) {
       node = { x, y, g: Infinity, f: Infinity, parent: null, closed: false };
@@ -112,7 +135,13 @@ export function findPath(
     expansions += 1;
     for (const step of STEPS) {
       const next = { x: current.x + step.dx, y: current.y + step.dy };
-      if (next.x < 0 || next.y < 0 || next.x >= width || next.y >= height || blocked(next)) {
+      if (
+        next.x < x0 ||
+        next.y < y0 ||
+        next.x >= x0 + width ||
+        next.y >= y0 + height ||
+        blocked(next)
+      ) {
         continue;
       }
       const neighbor = nodeAt(next.x, next.y);

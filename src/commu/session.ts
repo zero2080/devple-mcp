@@ -10,13 +10,24 @@ import {
   CommuNotConnectedError,
   type EndedReason,
 } from './errors.js';
+import {
+  ChunkCache,
+  chunkGround,
+  chunkOf,
+  loadTerrainRules,
+  mapGround,
+  type Ground,
+  type TerrainRules,
+} from './ground.js';
 import { CommuHttp } from './http.js';
 import { Inbox, type InboxItem } from './inbox.js';
 import type { MapGrid } from './map.js';
 import { blockedBeforeMoving, Mover, type MoveResult } from './mover.js';
-import { createPathGrid, freeTileNear } from './pathfinding.js';
+import { createAreaPathGrid, freeTileNear } from './pathfinding.js';
 import {
   mapGridSchema,
+  systemHeartbeatPayloadSchema,
+  worldChunkPayloadSchema,
   presenceLeftPayloadSchema,
   presenceSchema,
   presenceUpdatedPayloadSchema,
@@ -30,6 +41,7 @@ import {
 } from './schemas.js';
 import { SseClient, type SseState } from './sse.js';
 import contractMap from './contract/maps/main.json' with { type: 'json' };
+import contractTerrain from './contract/world/terrain.json' with { type: 'json' };
 import { chebyshev, WorldState, type NearbyPresence, type TilePoint } from './world.js';
 
 /** ARCHITECTURE 3: idle → entering → online → leaving → idle. ended 는 복구 없음 */
@@ -40,8 +52,10 @@ export interface SessionDeps {
   fetchImpl?: typeof fetch;
   clock?: Clock;
   requestTimeoutMs?: number;
-  /** 맵 격자. 기본은 계약 자산(src/commu/contract/maps/main.json) */
+  /** 옛 맵 격자. 기본은 계약 자산(src/commu/contract/maps/main.json) */
   map?: MapGrid;
+  /** 지상 월드 지형 규칙. 기본은 계약 자산(src/commu/contract/world/terrain.json) */
+  terrain?: TerrainRules;
   /** 이동 속도·배칭 (기본 150ms/타일 · 200ms 전송 · 40타일, 테스트용) */
   move?: { tileMs?: number; batchMs?: number; maxTiles?: number };
   /** SSE 유휴 타임아웃·백오프 (테스트용) */
@@ -98,6 +112,9 @@ export class CommuSession {
   readonly auth: AuthManager;
   readonly client: CommuClient;
   readonly map: MapGrid;
+  readonly terrain: TerrainRules;
+  /** 지상 월드 청크 (MCP.md 3.2: 세션 동안 캐시, world.chunk 로 바꾼다) */
+  readonly chunks = new ChunkCache();
   state: SessionState = 'idle';
 
   private sse: SseClient | null = null;
@@ -135,9 +152,11 @@ export class CommuSession {
     this.http.tokenSource = this.auth;
     this.client = new CommuClient(this.http);
     this.map = deps.map ?? loadContractMap();
+    this.terrain = deps.terrain ?? loadTerrainRules(contractTerrain);
     this.mover = new Mover({
       clock: this.clock,
-      map: this.map,
+      ground: () => this.ground(),
+      onNotReady: (tile) => this.chunks.forget(chunkOf(tile.x, tile.y, this.terrain.chunkSize)),
       occupied: () => this.world.others().map((p) => p.position),
       putPosition: (body) => this.client.putPosition(body),
       nextSeq: () => {
@@ -166,6 +185,51 @@ export class CommuSession {
 
   get online(): boolean {
     return this.state === 'online';
+  }
+
+  /** 서버가 지상 월드로 떠 있는지 — ServerConfig.chunkSize 유무 (API_CONTRACT 6 전환 기간, MCP.md 8) */
+  get groundWorld(): boolean {
+    return this.serverConfig?.chunkSize !== undefined;
+  }
+
+  /** 지금의 땅: 지상 월드면 받아 둔 청크, 아니면 계약 자산 옛 맵 (W6) */
+  ground(): Ground {
+    const size = this.serverConfig?.chunkSize;
+    if (size === undefined) return mapGround(this.map);
+    if (size !== this.terrain.chunkSize) {
+      throw new Error(
+        `서버 chunkSize ${String(size)} 와 지형 자산 ${String(this.terrain.chunkSize)} 가 다릅니다 — 계약 자산을 다시 동기화하세요`,
+      );
+    }
+    return chunkGround(this.chunks, this.terrain);
+  }
+
+  /**
+   * 지상 월드: 내 청크 중심 시야 정사각형(viewRadiusChunks)에 받지 않은 청크가 있으면 한 번에 조회하고, 반경 + 1 밖은 버린다
+   * (프론트 ChunkLoader 와 같은 규칙, 타이머 대신 필요할 때 — 이동·둘러보기 직전). 준비 중 청크는 5초 안에는 다시 묻지 않는다
+   */
+  async ensureChunks(): Promise<void> {
+    const size = this.serverConfig?.chunkSize;
+    const me = this.world.me();
+    const mapId = this.world.mapId;
+    if (size === undefined || !me || mapId === null) return;
+    const radius = this.serverConfig?.viewRadiusChunks ?? 2;
+    const center = chunkOf(me.position.x, me.position.y, size);
+    const now = this.clock.now();
+    let missing = false;
+    for (let dy = -radius; dy <= radius && !missing; dy += 1) {
+      for (let dx = -radius; dx <= radius && !missing; dx += 1) {
+        const c = { cx: center.cx + dx, cy: center.cy + dy };
+        missing =
+          this.chunks.get(c.cx, c.cy) === undefined &&
+          !this.chunks.isFreshPending(c, now, PENDING_RECHECK_MS);
+      }
+    }
+    if (missing) {
+      const res = await this.client.getChunks(mapId, center.cx, center.cy, radius);
+      this.chunks.applyFetched(res.chunks, res.pending, now);
+    }
+    this.chunks.prune(center, radius + 1);
   }
 
   get endedReason(): EndedReason | null {
@@ -358,7 +422,7 @@ export class CommuSession {
       position: myPresence?.position ?? null,
       proximityRadius: radius,
       maxMessageLength: this.serverConfig?.maxMessageLength ?? null,
-      onlineCount: this.world.size,
+      onlineCount: this.world.onlineCount ?? this.world.size,
       nearbyCount: radius === null ? 0 : this.world.nearby(radius).filter((p) => p.inRadius).length,
       unread: this.inbox.unread(),
       inbox: {
@@ -403,14 +467,17 @@ export class CommuSession {
   private async doMove(target: MoveTarget): Promise<MoveToResult> {
     const me = this.requirePresence();
     const from = me.position;
+    await this.ensureChunks();
     if (!('userId' in target)) return this.mover.run(from, target);
 
     const { userId } = target;
     if (userId === me.userId) throw new Error('자기 자신에게는 이동할 수 없습니다');
     const located = await this.locateUser(userId, from.mapId);
     if ('reason' in located) return blockedBeforeMoving(from, from, located.reason);
-    const grid = createPathGrid(
-      this.map,
+    const ground = this.ground();
+    const grid = createAreaPathGrid(
+      ground,
+      ground.searchArea(from, located.tile),
       this.world.others().map((p) => p.position),
     );
     const goal = freeTileNear(grid, located.tile, from);
@@ -512,6 +579,7 @@ export class CommuSession {
     this.sse = null;
     await sse?.close();
     this.world.clear();
+    this.chunks.clear();
     if (this.state === 'leaving') this.state = 'idle';
     log.info(`left Commu (${reason})`);
     this.wake();
@@ -567,6 +635,14 @@ export class CommuSession {
         case 'presence.updated':
           this.world.applyUpdated(presenceUpdatedPayloadSchema.parse(envelope.payload));
           break;
+        case 'world.chunk': {
+          const { mapId, chunk } = worldChunkPayloadSchema.parse(envelope.payload);
+          if (mapId === this.world.mapId) this.chunks.applyChunk(chunk);
+          break;
+        }
+        case 'system.heartbeat':
+          this.world.onlineCount = systemHeartbeatPayloadSchema.parse(envelope.payload).onlineCount;
+          break;
         default:
           break;
       }
@@ -581,6 +657,9 @@ export class CommuSession {
     }
   }
 }
+
+/** 준비 중 청크를 다시 묻기까지 (world.chunk 는 서버가 인정한 위치 기준이라 놓칠 수 있다 — 프론트 PENDING_RECHECK_MS) */
+const PENDING_RECHECK_MS = 5_000;
 
 /** 계약 자산 맵 (프론트 src/assets/maps/main.json 의 동기화 사본). 빌드에서는 dist/commu/contract/maps/main.json */
 function loadContractMap(): MapGrid {

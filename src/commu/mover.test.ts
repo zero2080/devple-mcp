@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { ManualClock } from './clock.js';
 import { CommuApiError } from './errors.js';
+import { ChunkCache, chunkGround, mapGround, type Ground, type TerrainRules } from './ground.js';
 import type { MapGrid } from './map.js';
 import { MAX_REPLANS, MAX_TILES, MAX_TILES_PER_REQUEST, Mover } from './mover.js';
 import type { Position, PositionRejectedReason } from './schemas.js';
@@ -65,6 +66,8 @@ function harness(
   start: Position,
   opts: {
     map?: MapGrid;
+    ground?: () => Ground;
+    onNotReady?: (tile: TilePoint) => void;
     others?: () => TilePoint[];
     tileMs?: number;
     batchMs?: number;
@@ -77,7 +80,7 @@ function harness(
   let lastSeq = 0;
   const mover = new Mover({
     clock,
-    map: opts.map ?? grid(40, 30),
+    ground: opts.ground ?? (() => mapGround(opts.map ?? grid(40, 30))),
     occupied: opts.others ?? (() => []),
     putPosition: server.put,
     nextSeq: () => {
@@ -85,6 +88,7 @@ function harness(
       return lastSeq;
     },
     onAccepted: (p) => accepted.push(p),
+    ...(opts.onNotReady !== undefined ? { onNotReady: opts.onNotReady } : {}),
     tileMs: opts.tileMs ?? 0,
     batchMs: opts.batchMs ?? 0,
     ...(opts.maxTiles !== undefined ? { maxTiles: opts.maxTiles } : {}),
@@ -185,7 +189,7 @@ describe('Mover (MCP.md 5.3 commu_move_to 동작)', () => {
     };
     const mover = new Mover({
       clock: h.clock,
-      map: grid(40, 30),
+      ground: () => mapGround(grid(40, 30)),
       occupied: () => others,
       putPosition: (body) => h.server.put(body),
       nextSeq: () => h.clock.now(),
@@ -252,5 +256,75 @@ describe('Mover (MCP.md 5.3 commu_move_to 동작)', () => {
       status: 'blocked',
       reason: 'collision',
     });
+  });
+});
+
+describe('Mover — 지상 월드 (MCP.md 5.3, W6)', () => {
+  const SIZE = 8;
+  const rules: TerrainRules = { chunkSize: SIZE, pass: { '.': 'walk', '~': 'water' } };
+  const chunk = (
+    cx: number,
+    cy: number,
+    rows: string[] = Array<string>(SIZE).fill('.'.repeat(SIZE)),
+  ) => ({
+    cx,
+    cy,
+    rows,
+    places: [],
+    concept: 'test',
+    version: 1,
+  });
+  const world = (x: number, y: number): Position => ({ mapId: 'world', x, y, dir: 'down' });
+
+  /** 청크 (-1..0, -1..0) 4개를 받아 둔 땅. (-1, -1) 청크 가운데 줄은 물 */
+  function ground(): { cache: ChunkCache; ground: () => Ground } {
+    const cache = new ChunkCache();
+    const water = Array<string>(SIZE).fill('.'.repeat(SIZE));
+    water[4] = '~~~~~~~.';
+    cache.applyFetched([chunk(-1, -1, water), chunk(0, -1), chunk(-1, 0), chunk(0, 0)], [], 0);
+    return { cache, ground: () => chunkGround(cache, rules, 8) };
+  }
+
+  it('음수 좌표로 걷고, 물은 돌아간다 — 청크 경계를 넘어도 같은 경로', async () => {
+    const g = ground();
+    const h = harness(world(-6, -6), { ground: g.ground });
+    const result = await drive(h.clock, h.mover.run(world(-6, -6), { x: -6, y: -2 }));
+    expect(result).toMatchObject({ status: 'arrived', position: { x: -6, y: -2 } });
+    // y −4 줄은 x −8..−2 가 물 → x −1 로 돌아간다
+    expect(h.server.requests.some((r) => r.x === -1 || r.x === -2)).toBe(true);
+    expect(h.server.requests.every((r) => r.mapId === 'world')).toBe(true);
+  });
+
+  it('받지 않은 청크는 벽 — 목적지가 거기면 걷지 않고 blocked(not_ready), 지형이 막혔으면 collision', async () => {
+    const g = ground();
+    const h = harness(world(0, 0), { ground: g.ground });
+    expect(await drive(h.clock, h.mover.run(world(0, 0), { x: 20, y: 0 }))).toMatchObject({
+      status: 'blocked',
+      reason: 'not_ready',
+      requests: 0,
+    });
+    expect(await drive(h.clock, h.mover.run(world(0, 0), { x: -5, y: -4 }))).toMatchObject({
+      status: 'blocked',
+      reason: 'collision',
+      requests: 0,
+    });
+  });
+
+  it('409 not_ready 면 그 청크를 잊게 알리고(벽이 된다), 다른 길로 다시 계산한다', async () => {
+    const g = ground();
+    const forgotten: TilePoint[] = [];
+    const h = harness(world(-2, 2), {
+      ground: g.ground,
+      onNotReady: (tile) => {
+        forgotten.push(tile);
+        g.cache.forget({ cx: Math.floor(tile.x / SIZE), cy: Math.floor(tile.y / SIZE) });
+      },
+    });
+    h.server.rejectNext.push('not_ready');
+    const result = await drive(h.clock, h.mover.run(world(-2, 2), { x: -2, y: -3 }));
+    expect(forgotten).toHaveLength(1);
+    expect(result.rejections).toBe(1);
+    expect(result.replans).toBe(1);
+    expect(['arrived', 'blocked']).toContain(result.status);
   });
 });

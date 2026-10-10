@@ -1,0 +1,24 @@
+{
+  "version": 2,
+  "chunkSize": 32,
+  "terrain": {
+    ".": { "name": "grass", "pass": "walk" },
+    ",": { "name": "flowers", "pass": "walk" },
+    ":": { "name": "dirt", "pass": "walk" },
+    "=": { "name": "stone", "pass": "walk" },
+    "_": { "name": "sand", "pass": "walk" },
+    "~": { "name": "water", "pass": "water" },
+    "\"": { "name": "flower_bed", "pass": "block" },
+    "#": { "name": "wall", "pass": "block" },
+    "T": { "name": "tree", "pass": "block" },
+    "o": { "name": "rock", "pass": "block" },
+    "H": { "name": "house", "pass": "block" },
+    "D": { "name": "door", "pass": "block" },
+    "t": { "name": "table", "pass": "block" }
+  },
+  "structures": {
+    "house": { "rows": ["HHHHHHH", "HHHHHHH", "HHHHHHH", "HHHDHHH"] },
+    "table": { "rows": ["ttt", "ttt"] },
+    "tree": { "char": "T", "canopyRows": 3, "canopyForbidden": "HDt#~" }
+  }
+}
