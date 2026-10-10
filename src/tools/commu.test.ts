@@ -413,6 +413,18 @@ describe('commu_* 도구 (MCP 클라이언트 → 서버 → 가짜 Commu)', () 
     );
     expect(homes()).toBe(before + 2);
 
+    // 바로 옆 칸이 점유된 목적지: 봇(21,16) 위 칸에서 봇 칸으로 — 걷지 않고 arrived, goal 은 좌표만 (도구 출력 스키마)
+    expect((await call('commu_move_to', { x: 21, y: 15 })).data).toMatchObject({
+      status: 'arrived',
+    });
+    expect((await call('commu_move_to', { x: 21, y: 16 })).data).toMatchObject({
+      status: 'arrived',
+      tilesMoved: 0,
+      requests: 0,
+      goal: { x: 21, y: 15 },
+      position: { x: 21, y: 15 },
+    });
+
     const look = await call('commu_look_around');
     expect(look.data).toMatchObject({ area: null, places: [], onlineCount: 4 });
     expect((await call('commu_move_to', { place: '광장' })).data).toMatchObject({
@@ -829,6 +841,8 @@ describe('commu_* 도구 — 지상 월드 (MCP.md 5.1·5.3, W6)', () => {
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     client = new Client({ name: 'commu-ground-test', version: '0.0.0' });
     await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    // 클라이언트는 listTools 로 받아 둔 outputSchema 로만 결과를 검사한다 — 실서버 E2E·LLM 클라이언트처럼 먼저 받아 둔다
+    await client.listTools();
     close = async () => {
       await client.close();
       await server.close();
@@ -887,6 +901,13 @@ describe('commu_* 도구 — 지상 월드 (MCP.md 5.1·5.3, W6)', () => {
     expect((look.data['places'] as Structured[])[0]).toMatchObject({
       name: '분수 광장',
       distance: 0,
+    });
+    // 이미 장소 안이면 제자리 — goal 은 좌표만 (리허설에서 찾은 출력 스키마 오류)
+    expect((await call('commu_move_to', { place: '분수 광장' })).data).toMatchObject({
+      status: 'arrived',
+      tilesMoved: 0,
+      requests: 0,
+      goal: { x: 16, y: 20 },
     });
 
     const again = await client.callTool({ name: 'commu_go_home', arguments: {} });
