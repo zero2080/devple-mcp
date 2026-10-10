@@ -138,6 +138,22 @@ describe('Mover (MCP.md 5.3 commu_move_to 동작)', () => {
     expect(h.accepted).toHaveLength(MAX_TILES / 2);
   });
 
+  it('shouldStop 이면 다음 걸음 전에 멈추고 partial — 위치는 서버가 인정한 것, 그 뒤로 보내지 않는다 (commu_go_home)', async () => {
+    const h = harness(at(1, 1), { tileMs: 150, batchMs: 200 });
+    const result = await drive(
+      h.clock,
+      h.mover.run(at(1, 1), { x: 30, y: 1 }, { shouldStop: () => h.server.requests.length >= 2 }),
+    );
+    expect(result).toMatchObject({
+      status: 'partial',
+      tilesMoved: 4,
+      requests: 2,
+      position: { x: 5, y: 1 },
+      remainingTiles: 25,
+    });
+    expect(h.server.requests).toHaveLength(2);
+  });
+
   it('409 occupied 는 그 칸을 피해 다시 계산하고, too_far·collision 은 서버가 준 위치에서 다시 계산한다', async () => {
     const h = harness(at(20, 15));
     h.server.occupied.add('20,18'); // 월드는 모르는 끼어든 사람

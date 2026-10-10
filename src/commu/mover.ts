@@ -33,7 +33,8 @@ export type BlockedReason =
   | 'too_far'
   | 'user_offline'
   | 'other_map'
-  | 'no_free_tile';
+  | 'no_free_tile'
+  | 'unknown_place';
 
 export interface MoveResult {
   status: MoveStatus;
@@ -77,6 +78,11 @@ export interface MoverDeps {
 export interface MoveOptions {
   /** 도착한 뒤 바라볼 타일 ({ userId } 목적지의 그 사람) */
   face?: TilePoint;
+  /**
+   * true 를 돌려주면 다음 걸음 전에 멈추고 partial (commu_go_home 이 진행 중인 이동을 끝낸다 — MCP.md 5.3).
+   * 아직 보내지 않은 걸음은 버린다 — 결과 position 은 서버가 인정한 마지막 위치
+   */
+  shouldStop?: () => boolean;
 }
 
 interface Route {
@@ -180,7 +186,7 @@ export class Mover {
       if (index >= route.path.length) {
         return result('arrived', route.goal);
       }
-      if (walked >= this.maxTiles) {
+      if (options.shouldStop?.() === true || walked >= this.maxTiles) {
         return result('partial', route.goal);
       }
       const next = route.path[index]!;
@@ -248,7 +254,7 @@ export class Mover {
   }
 }
 
-/** 걷기 전에 막힌 결과 (목적지 해석 실패 등) */
+/** 걷기 전에 막힌 결과 (목적지 해석 실패 등). goal 은 좌표만 — Position 을 넘겨도 mapId·dir 는 버린다 (도구 출력 스키마) */
 export function blockedBeforeMoving(
   from: Position,
   goal: TilePoint,
@@ -259,7 +265,7 @@ export function blockedBeforeMoving(
     reason,
     from,
     position: from,
-    goal,
+    goal: { x: goal.x, y: goal.y },
     tilesMoved: 0,
     remainingTiles: manhattan(from, goal),
     requests: 0,

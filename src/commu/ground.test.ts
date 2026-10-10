@@ -7,6 +7,7 @@ import {
   chunkOf,
   loadTerrainRules,
   mapGround,
+  placeDistance,
   TERRAIN_VERSION,
   TILE_LIMIT,
   type TerrainRules,
@@ -96,6 +97,40 @@ describe('ChunkCache · chunkGround (MCP.md 3.2·5.3)', () => {
     expect(cache.get(0, 0)).toBeUndefined();
     cache.clear();
     expect(cache.size).toBe(0);
+  });
+
+  it('구역(areaAt)·근처 장소(placesNear): 시야 반경 안 청크만, 영역까지 체비쇼프 거리 가까운 순 — 같은 거리는 북서쪽 청크부터', () => {
+    const withPlaces = (cx: number, cy: number, places: WorldChunk['places']): WorldChunk => ({
+      ...chunk(cx, cy),
+      places,
+      concept: `구역 ${String(cx)},${String(cy)}`,
+    });
+    const cache = new ChunkCache();
+    cache.applyFetched(
+      [
+        withPlaces(0, 0, [
+          { name: '광장', x: 0, y: 0, w: 2, h: 2 },
+          { name: '정자', x: 3, y: 3, w: 1, h: 1 },
+        ]),
+        withPlaces(1, 0, [{ name: '정자', x: 4, y: 0, w: 1, h: 1 }]),
+        withPlaces(-1, 0, [{ name: '숲', x: -4, y: 0, w: 4, h: 4 }]),
+        withPlaces(3, 0, [{ name: '먼 곳', x: 12, y: 0, w: 1, h: 1 }]),
+      ],
+      [],
+      0,
+    );
+    const me = { x: 1, y: 1 };
+    expect(cache.areaAt(rules, me)).toEqual({ concept: '구역 0,0', place: '광장' });
+    expect(cache.areaAt(rules, { x: 2, y: 2 })).toEqual({ concept: '구역 0,0' });
+    expect(cache.areaAt(rules, { x: 0, y: 8 })).toBeUndefined();
+    // 청크 3 은 반경 2 밖. 숲(청크 −1)과 정자(청크 0)는 둘 다 2 — 북서쪽 청크인 숲이 먼저
+    expect(cache.placesNear(rules, me, 2).map((p) => [p.name, p.distance])).toEqual([
+      ['광장', 0],
+      ['숲', 2],
+      ['정자', 2],
+      ['정자', 3],
+    ]);
+    expect(placeDistance({ x: -1, y: 9 }, { name: 'a', x: 2, y: 3, w: 3, h: 2 })).toBe(5);
   });
 
   it('옛 맵 땅: collision·맵 밖은 벽(collision), 탐색 범위는 맵 전체', () => {

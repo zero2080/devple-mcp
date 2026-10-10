@@ -16,14 +16,17 @@ import {
   chunkOf,
   loadTerrainRules,
   mapGround,
+  type Area,
   type Ground,
+  type PlaceNearby,
   type TerrainRules,
+  type TileRect,
 } from './ground.js';
 import { CommuHttp } from './http.js';
 import { Inbox, type InboxItem } from './inbox.js';
 import type { MapGrid } from './map.js';
 import { blockedBeforeMoving, Mover, type MoveResult } from './mover.js';
-import { createAreaPathGrid, freeTileNear } from './pathfinding.js';
+import { createAreaPathGrid, freeTileNear, nearestTileIn } from './pathfinding.js';
 import {
   mapGridSchema,
   systemHeartbeatPayloadSchema,
@@ -34,6 +37,7 @@ import {
   worldPositionsPayloadSchema,
   worldSnapshotPayloadSchema,
   type Me,
+  type Place,
   type Position,
   type PublicMessage,
   type ServerConfig,
@@ -86,12 +90,23 @@ export interface SessionStatus {
   moving: boolean;
 }
 
-/** commu_move_to 입력 (MCP.md 5.3): 타일 좌표 또는 사람 */
-export type MoveTarget = { x: number; y: number } | { userId: string };
+/** commu_move_to 입력 (MCP.md 5.3): 타일 좌표, 사람, 또는 근처 장소 이름 */
+export type MoveTarget = { x: number; y: number } | { userId: string } | { place: string };
 
 export interface MoveToResult extends MoveResult {
   /** { userId } 목적지일 때 그 사람과의 거리 (체비쇼프) 와 근접 반경 안 여부 */
   user?: { userId: string; distance: number; withinProximity: boolean };
+  /** { place } 목적지일 때 찾은 장소 (같은 이름이 여럿이면 가장 가까운 것) */
+  place?: Place;
+}
+
+/** commu_go_home 결과 (MCP.md 5.3) */
+export interface GoHomeResult {
+  from: Position;
+  /** 서버가 정한 새 위치 (지상 월드는 첫 마을, 옛 맵은 스폰) */
+  position: Position;
+  /** 새 위치의 구역 (지상 월드에서 청크를 받았을 때만) */
+  area: Area | null;
 }
 
 export interface SayResult {
@@ -123,6 +138,8 @@ export class CommuSession {
   /** 행동 도구·이동을 호출 순서대로 하나씩 (위치 경쟁 방지, ARCHITECTURE 6) */
   private actions: Promise<unknown> = Promise.resolve();
   private moving: Promise<unknown> | null = null;
+  /** 진행 중인 commu_move_to 를 다음 걸음 전에 멈춘다 (commu_go_home — MCP.md 5.3). 걷는 중일 때만 있다 */
+  private stopMove: (() => void) | null = null;
   /** commu_wait_for_events 가 기다리는 중 — 보관함 도착·퇴장·종료 때 깨운다 */
   private readonly wakers = new Set<() => void>();
   private idleTimer: ClockTimer | null = null;
@@ -206,9 +223,10 @@ export class CommuSession {
 
   /**
    * 지상 월드: 내 청크 중심 시야 정사각형(viewRadiusChunks)에 받지 않은 청크가 있으면 한 번에 조회하고, 반경 + 1 밖은 버린다
-   * (프론트 ChunkLoader 와 같은 규칙, 타이머 대신 필요할 때 — 이동·둘러보기 직전). 준비 중 청크는 5초 안에는 다시 묻지 않는다
+   * (프론트 ChunkLoader 와 같은 규칙, 타이머 대신 필요할 때 — 이동·둘러보기·귀환 직전). 준비 중 청크는 5초 안에는 다시 묻지 않는다.
+   * refresh 면 빈 곳이 없어도 다시 받는다 (재동기화 — 놓친 world.chunk, API_CONTRACT 3.5)
    */
-  async ensureChunks(): Promise<void> {
+  async ensureChunks(refresh = false): Promise<void> {
     const size = this.serverConfig?.chunkSize;
     const me = this.world.me();
     const mapId = this.world.mapId;
@@ -216,7 +234,7 @@ export class CommuSession {
     const radius = this.serverConfig?.viewRadiusChunks ?? 2;
     const center = chunkOf(me.position.x, me.position.y, size);
     const now = this.clock.now();
-    let missing = false;
+    let missing = refresh;
     for (let dy = -radius; dy <= radius && !missing; dy += 1) {
       for (let dx = -radius; dx <= radius && !missing; dx += 1) {
         const c = { cx: center.cx + dx, cy: center.cy + dy };
@@ -230,6 +248,38 @@ export class CommuSession {
       this.chunks.applyFetched(res.chunks, res.pending, now);
     }
     this.chunks.prune(center, radius + 1);
+  }
+
+  /** ensureChunks 를 하되 실패는 경고만 — 둘러보기·귀환은 받아 둔 청크로 계속한다 */
+  async tryEnsureChunks(): Promise<void> {
+    try {
+      await this.ensureChunks();
+    } catch (error) {
+      log.warn(
+        'chunk fetch failed',
+        error instanceof CommuApiError ? { status: error.status, code: error.code } : error,
+      );
+    }
+  }
+
+  /** 받아 둔 청크로 읽을 수 있는 지상 월드인지 (옛 맵이거나 청크 크기가 지형 자산과 다르면 아니다) */
+  private get readableGround(): boolean {
+    return this.serverConfig?.chunkSize === this.terrain.chunkSize;
+  }
+
+  /** 내가 있는 구역 (MCP.md 5.1 area). 옛 맵·입장 전·내 청크를 아직 받지 않았으면 null */
+  area(): Area | null {
+    const me = this.world.me();
+    if (!me || !this.readableGround) return null;
+    return this.chunks.areaAt(this.terrain, me.position) ?? null;
+  }
+
+  /** 시야 안(내 청크에서 viewRadiusChunks) 받아 둔 청크의 장소, 가까운 순 (MCP.md 5.1 places). 옛 맵이면 없다 */
+  placesNearby(): PlaceNearby[] {
+    const me = this.world.me();
+    if (!me || !this.readableGround) return [];
+    const radius = this.serverConfig?.viewRadiusChunks ?? 2;
+    return this.chunks.placesNear(this.terrain, me.position, radius);
   }
 
   get endedReason(): EndedReason | null {
@@ -467,11 +517,30 @@ export class CommuSession {
   private async doMove(target: MoveTarget): Promise<MoveToResult> {
     const me = this.requirePresence();
     const from = me.position;
-    await this.ensureChunks();
-    if (!('userId' in target)) return this.mover.run(from, target);
+    let stopped = false;
+    this.stopMove = () => {
+      stopped = true;
+    };
+    const shouldStop = () => stopped;
+    try {
+      await this.ensureChunks();
+      if ('userId' in target)
+        return await this.moveToUser(from, me.userId, target.userId, shouldStop);
+      if ('place' in target) return await this.moveToPlace(from, target.place, shouldStop);
+      return await this.mover.run(from, target, { shouldStop });
+    } finally {
+      this.stopMove = null;
+    }
+  }
 
-    const { userId } = target;
-    if (userId === me.userId) throw new Error('자기 자신에게는 이동할 수 없습니다');
+  /** { userId }: 그 사람 주변 8칸 중 내게 가장 가까운 빈 칸으로 가서 그 사람을 본다 */
+  private async moveToUser(
+    from: Position,
+    myUserId: string,
+    userId: string,
+    shouldStop: () => boolean,
+  ): Promise<MoveToResult> {
+    if (userId === myUserId) throw new Error('자기 자신에게는 이동할 수 없습니다');
     const located = await this.locateUser(userId, from.mapId);
     if ('reason' in located) return blockedBeforeMoving(from, from, located.reason);
     const ground = this.ground();
@@ -482,12 +551,63 @@ export class CommuSession {
     );
     const goal = freeTileNear(grid, located.tile, from);
     if (!goal) return blockedBeforeMoving(from, located.tile, 'no_free_tile');
-    const result = await this.mover.run(from, goal, { face: located.tile });
+    const result = await this.mover.run(from, goal, { face: located.tile, shouldStop });
     // 걷는 동안 그 사람이 움직였을 수 있다 — 거리는 지금 월드 기준
     const now = this.world.others().find((p) => p.userId === userId)?.position ?? located.tile;
     const distance = chebyshev(result.position, now);
     const radius = this.serverConfig?.proximityRadius ?? 5;
     return { ...result, user: { userId, distance, withinProximity: distance <= radius } };
+  }
+
+  /**
+   * { place } (MCP.md 5.3): 시야 안 그 이름의 장소(여럿이면 가장 가까운 것) 영역 안에서 걸어서 가장 가까운 빈 walk 칸.
+   * 시야 안에 없으면 blocked(unknown_place), 영역에 설 칸이 없으면(물·집) no_free_tile
+   */
+  private async moveToPlace(
+    from: Position,
+    name: string,
+    shouldStop: () => boolean,
+  ): Promise<MoveToResult> {
+    const found = this.placesNearby().find((p) => p.name === name);
+    if (!found) return blockedBeforeMoving(from, from, 'unknown_place');
+    const place: Place = { name: found.name, x: found.x, y: found.y, w: found.w, h: found.h };
+    const rect: TileRect = { x0: place.x, y0: place.y, width: place.w, height: place.h };
+    const ground = this.ground();
+    const area = unionRect(
+      ground.searchArea(from, { x: place.x, y: place.y }),
+      ground.searchArea(from, { x: place.x + place.w - 1, y: place.y + place.h - 1 }),
+    );
+    const grid = createAreaPathGrid(
+      ground,
+      area,
+      this.world.others().map((p) => p.position),
+    );
+    const goal = nearestTileIn(grid, from, rect);
+    if ('reason' in goal) {
+      const edge = {
+        x: clamp(from.x, rect.x0, rect.x0 + rect.width - 1),
+        y: clamp(from.y, rect.y0, rect.y0 + rect.height - 1),
+      };
+      return { ...blockedBeforeMoving(from, edge, goal.reason), place };
+    }
+    return { ...(await this.mover.run(from, goal.tile, { shouldStop })), place };
+  }
+
+  /**
+   * commu_go_home (MCP.md 5.3): 진행 중인 이동을 partial 로 끝내고(대기열에서 그 뒤에 실행) 첫 마을로 순간이동한다.
+   * 서버가 새 world.snapshot 을 보내 월드를 바꾸고, 새 위치의 시야 청크를 받는다(먼 청크는 버린다). 429 는 재시도하지 않는다
+   */
+  goHome(): Promise<GoHomeResult> {
+    this.stopMove?.();
+    return this.act(() => this.doGoHome());
+  }
+
+  private async doGoHome(): Promise<GoHomeResult> {
+    const from = this.requirePresence().position;
+    const position = await this.client.goHome();
+    this.world.setMyPosition(position, this.clock.now());
+    await this.tryEnsureChunks();
+    return { from, position, area: this.area() };
   }
 
   /** 월드에 있으면 그 위치, 없으면 GET /users/{id} (없는 사람은 404 NOT_FOUND user 그대로) */
@@ -518,6 +638,8 @@ export class CommuSession {
       const mapId = this.world.mapId ?? this.serverConfig?.defaultMapId ?? 'main';
       const res = await this.client.getPresences(mapId);
       this.world.applySnapshot(res, this.clock.now());
+      // API_CONTRACT 3.5: 시야 청크도 다시 확인한다 — world.chunk 는 재전송 버퍼에 없어 재생성을 놓쳤을 수 있다
+      await this.ensureChunks(true);
       log.info(`world resynced (${reason})`);
     } catch (error) {
       log.warn('resync failed', error);
@@ -656,6 +778,22 @@ export class CommuSession {
       log.warn(`inbox skipped ${envelope.type}`, error);
     }
   }
+}
+
+/** a 와 b 를 함께 덮는 가장 작은 사각형 */
+function unionRect(a: TileRect, b: TileRect): TileRect {
+  const x0 = Math.min(a.x0, b.x0);
+  const y0 = Math.min(a.y0, b.y0);
+  return {
+    x0,
+    y0,
+    width: Math.max(a.x0 + a.width, b.x0 + b.width) - x0,
+    height: Math.max(a.y0 + a.height, b.y0 + b.height) - y0,
+  };
+}
+
+function clamp(v: number, min: number, max: number): number {
+  return Math.min(Math.max(v, min), max);
 }
 
 /** 준비 중 청크를 다시 묻기까지 (world.chunk 는 서버가 인정한 위치 기준이라 놓칠 수 있다 — 프론트 PENDING_RECHECK_MS) */

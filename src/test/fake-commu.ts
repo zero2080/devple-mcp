@@ -92,10 +92,17 @@ function extractLinks(content: string): string[] {
 export interface FakeGround {
   chunks: WorldChunk[];
   ready?: ChunkCoord[];
+  /** 입장 위치 (지난번 위치 흉내). 생략하면 home */
   spawn?: { x: number; y: number };
+  /** 마을 귀환 위치 (원점 스폰). 생략하면 GROUND_HOME */
+  home?: { x: number; y: number };
 }
 
 export const GROUND_CHUNK_SIZE = 32;
+/** 지상 월드 원점 스폰 = 첫 마을 분수 광장 (프론트 Mock GROUND_SPAWN) */
+export const GROUND_HOME = { x: 16, y: 20 };
+/** API_CONTRACT 1.4: 마을 귀환 1회/10초 */
+export const HOME_INTERVAL_MS = 10_000;
 
 export class FakeCommu {
   readonly calls: RecordedCall[] = [];
@@ -105,7 +112,11 @@ export class FakeCommu {
   readonly blockedTiles = new Set<string>();
   /** 'main'(옛 맵) 또는 'world'(지상 월드) */
   readonly mapId: string;
+  /** 마을 귀환 위치: 지상 월드는 원점 스폰, 옛 맵은 스폰 */
+  readonly home: { x: number; y: number };
   myPosition: Position;
+  /** 마지막 마을 귀환 시각 (10초 한도) */
+  lastHomeAt: number | null = null;
   accessToken = 'access-1';
   origin = '';
   baseUrl = '';
@@ -163,7 +174,8 @@ export class FakeCommu {
         : {}),
       ...opts.config,
     };
-    this.myPosition = { mapId: this.mapId, ...(opts.ground?.spawn ?? SPAWN), dir: 'down' };
+    this.home = this.ground ? (opts.ground?.home ?? GROUND_HOME) : SPAWN;
+    this.myPosition = { mapId: this.mapId, ...(opts.ground?.spawn ?? this.home), dir: 'down' };
     for (const chunk of opts.ground?.chunks ?? []) {
       this.groundChunks.set(`${String(chunk.cx)},${String(chunk.cy)}`, chunk);
     }
@@ -529,6 +541,32 @@ export class FakeCommu {
       }
       this.myPosition = { mapId: this.mapId, x: b.x, y: b.y, dir: b.dir };
       return noContent();
+    }
+    if (method === 'POST' && path === '/me/position/home') {
+      if (this.streams.size === 0)
+        return fail(404, 'NOT_FOUND', 'Presence 없음', { resource: 'presence' });
+      const now = Date.now();
+      if (this.lastHomeAt !== null && now - this.lastHomeAt < HOME_INTERVAL_MS) {
+        const sec = Math.ceil((HOME_INTERVAL_MS - (now - this.lastHomeAt)) / 1000);
+        return json(
+          429,
+          { code: 'RATE_LIMITED', message: '너무 자주 보냈어요' },
+          { 'Retry-After': String(sec) },
+        );
+      }
+      this.lastHomeAt = now;
+      this.myPosition = { mapId: this.mapId, ...this.home, dir: 'down' };
+      // API_CONTRACT 2.2: 내 모든 연결에 새 world.snapshot (재전송 버퍼에는 넣지 않는다)
+      const presences = this.presences();
+      for (const stream of this.streams) {
+        this.emitTo(stream, 'world.snapshot', {
+          mapId: this.mapId,
+          presences,
+          onlineCount: presences.length,
+          serverTime: now,
+        });
+      }
+      return json(200, this.myPosition);
     }
     if (method === 'PUT' && path === '/me/presence') return noContent();
 

@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CommuSession } from '../commu/session.js';
 import { UNTRUSTED_NOTICE } from '../commu/untrusted.js';
 import { createServer } from '../server.js';
-import { FakeCommu, TEST_AI_TOKEN, waitUntil } from '../test/fake-commu.js';
+import { FakeCommu, GROUND_CHUNK_SIZE, TEST_AI_TOKEN, waitUntil } from '../test/fake-commu.js';
 
 type Structured = Record<string, unknown>;
 type ToolResult = Awaited<ReturnType<Client['callTool']>>;
@@ -21,10 +21,11 @@ const READ_TOOLS = [
   'commu_wait_for_events',
 ];
 
-/** C3 행동 도구 7종 + C4 이동 (MCP.md 5.3) */
+/** C3 행동 도구 7종 + 이동 2종 (MCP.md 5.3 — move_to·go_home) */
 const ACTION_TOOLS = [
   'commu_say',
   'commu_move_to',
+  'commu_go_home',
   'commu_send_dm',
   'commu_group_send',
   'commu_group_create',
@@ -35,6 +36,8 @@ const ACTION_TOOLS = [
 
 /** 다른 사용자가 쓸 수 있는 글 (MCP.md 6.1). untrusted 밖에 있으면 안 된다 — 내가 보낸 메시지(mine)의 content 만 예외 */
 const OTHER_TEXT = new Set(['nickname', 'content', 'statusMessage', 'name']);
+/** 장소 이름은 서버 생성기 글이다 (DOMAIN 4.4) — look_around 의 places[] 와 move_to 의 place */
+const GENERATED_NAME = /\.(places\[\d+\]|place)$/;
 
 function leaks(value: unknown, path = '$'): string[] {
   if (Array.isArray(value)) return value.flatMap((v, i) => leaks(v, `${path}[${String(i)}]`));
@@ -42,6 +45,7 @@ function leaks(value: unknown, path = '$'): string[] {
   const obj = value as Structured;
   return Object.entries(obj).flatMap(([key, inner]) => {
     if (key === 'untrusted') return [];
+    if (key === 'name' && GENERATED_NAME.test(path)) return [];
     if (OTHER_TEXT.has(key) && !(key === 'content' && obj['mine'] === true))
       return [`${path}.${key}`];
     return leaks(inner, `${path}.${key}`);
@@ -115,9 +119,10 @@ describe('commu_* 도구 (MCP 클라이언트 → 서버 → 가짜 Commu)', () 
     await close();
   });
 
-  it('수명 3종·읽기 8종(외형 조회·기다리기 포함)·행동 8종(이동 포함) = 19종이 있고, 바뀐 임시 도구는 없다', async () => {
+  it('수명 3종·읽기 8종(외형 조회·기다리기 포함)·행동 9종(이동·귀환 포함) = 20종이 있고, 바뀐 임시 도구는 없다', async () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name);
+    expect(names.filter((n) => n.startsWith('commu_'))).toHaveLength(20);
     expect(names).toEqual(
       expect.arrayContaining([
         'commu_enter',
@@ -376,12 +381,46 @@ describe('commu_* 도구 (MCP 클라이언트 → 서버 → 가짜 Commu)', () 
       position: { x: 20, y: 17 },
       moving: false,
     });
-    for (const bad of [{}, { x: 1 }, { x: 1, y: 1, userId: 'u2' }]) {
+    for (const bad of [
+      {},
+      { x: 1 },
+      { x: 1, y: 1, userId: 'u2' },
+      { x: 1, y: 1, place: '광장' },
+      { userId: 'u2', place: '광장' },
+      { place: '' },
+    ]) {
       const result = await client
         .callTool({ name: 'commu_move_to', arguments: bad })
         .catch((error: unknown) => ({ isError: true, content: [], error }));
       expect(result.isError, JSON.stringify(bad)).toBe(true);
     }
+  });
+
+  it('commu_go_home: 옛 맵은 스폰으로(area 없음), 10초 안 다시 부르면 남은 초를 알려 주고 자동 재시도하지 않는다 — 옛 맵에는 장소가 없다', async () => {
+    const homes = () => callsTo('POST', '/me/position/home');
+    const before = homes();
+    const home = await call('commu_go_home');
+    expect(home.result.isError, textOf(home.result)).toBeFalsy();
+    expect(home.data).toEqual({
+      from: { mapId: 'main', x: 20, y: 17, dir: 'up' },
+      position: { mapId: 'main', x: 20, y: 15, dir: 'down' },
+      area: null,
+    });
+    const again = await call('commu_go_home');
+    expect(again.result.isError).toBe(true);
+    expect(textOf(again.result)).toMatch(
+      /^마을 귀환은 10초에 한 번입니다\. \d+초 뒤에 다시 하세요/,
+    );
+    expect(homes()).toBe(before + 2);
+
+    const look = await call('commu_look_around');
+    expect(look.data).toMatchObject({ area: null, places: [], onlineCount: 4 });
+    expect((await call('commu_move_to', { place: '광장' })).data).toMatchObject({
+      status: 'blocked',
+      reason: 'unknown_place',
+      requests: 0,
+    });
+    fake.lastHomeAt = null;
   });
 
   it('계약 에러는 MCP.md 7 문장 + 계약 JSON 으로 돌아온다', async () => {
@@ -513,13 +552,14 @@ describe('commu_* 도구 (MCP 클라이언트 → 서버 → 가짜 Commu)', () 
     });
   });
 
-  it('행동 8종은 입장 전에 불러도 자동 입장한 뒤 수행한다 (MCP.md 3.1)', async () => {
+  it('행동 9종은 입장 전에 불러도 자동 입장한 뒤 수행한다 (MCP.md 3.1)', async () => {
     const { groupId } = (await call('commu_group_create', { name: '입장 모임' })).data['group'] as {
       groupId: string;
     };
     const cases: [string, Record<string, unknown>][] = [
       ['commu_say', { content: '왔어요' }],
       ['commu_move_to', { x: 20, y: 17 }],
+      ['commu_go_home', {}],
       ['commu_send_dm', { userId: 'u2', content: '왔어요' }],
       ['commu_group_send', { groupId, content: '왔어요' }],
       ['commu_group_create', { name: '새 모임' }],
@@ -732,5 +772,125 @@ describe('commu_* 도구 (MCP 클라이언트 → 서버 → 가짜 Commu)', () 
       expect(text.startsWith(UNTRUSTED_NOTICE), name).toBe(hasOtherText);
       expect(JSON.parse(text.replace(`${UNTRUSTED_NOTICE}\n\n`, '')), name).toEqual(data);
     }
+  });
+});
+
+describe('commu_* 도구 — 지상 월드 (MCP.md 5.1·5.3, W6)', () => {
+  type Place = { name: string; x: number; y: number; w: number; h: number };
+  const chunk = (cx: number, cy: number, places: Place[] = [], concept = '들판') => ({
+    cx,
+    cy,
+    rows: Array<string>(GROUND_CHUNK_SIZE).fill('.'.repeat(GROUND_CHUNK_SIZE)),
+    places,
+    concept,
+    version: 1,
+  });
+  const chunks = Array.from({ length: 25 }, (_, i) => {
+    const cx = (i % 5) - 2;
+    const cy = Math.floor(i / 5) - 2;
+    if (cx === 0 && cy === 0)
+      return chunk(0, 0, [{ name: '분수 광장', x: 12, y: 16, w: 9, h: 9 }], '첫 마을');
+    if (cx === 1 && cy === 0)
+      return chunk(1, 0, [{ name: '동쪽 숲', x: 50, y: 10, w: 8, h: 8 }], '동쪽 들판');
+    return chunk(cx, cy);
+  });
+  const fake = new FakeCommu({
+    ground: { chunks, spawn: { x: 60, y: 20 } },
+    others: [
+      { id: 'u2', nickname: '도트', online: true, position: { x: 62, y: 20 } },
+      { id: 'u3', nickname: '먼 사람', online: true, position: { x: 16, y: 23 } },
+    ],
+  });
+  let session: CommuSession;
+  let client: Client;
+  let close: () => Promise<void>;
+  const call = async (name: string, args: Record<string, unknown> = {}) => {
+    const result = await client.callTool({ name, arguments: args });
+    expect(result.isError, `${name}: ${textOf(result)}`).toBeFalsy();
+    const data = (result.structuredContent ?? {}) as Structured;
+    // commu_enter 의 me 는 내 정보 — 나머지 결과는 다른 사용자 글이 untrusted 밖에 없어야 한다 (MCP.md 6.1)
+    if (name !== 'commu_enter') expect(leaks(data), name).toEqual([]);
+    return { result, data };
+  };
+
+  beforeAll(async () => {
+    await fake.start();
+    session = new CommuSession(
+      {
+        enabled: true,
+        aiToken: TEST_AI_TOKEN,
+        baseUrl: fake.origin,
+        apiBaseUrl: fake.baseUrl,
+        idleMinutes: 10,
+      },
+      { move: { tileMs: 0, batchMs: 0 } },
+    );
+    const server = createServer({ session });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    client = new Client({ name: 'commu-ground-test', version: '0.0.0' });
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    close = async () => {
+      await client.close();
+      await server.close();
+      await session.leave('shutdown');
+      await fake.stop();
+    };
+  });
+
+  afterAll(async () => {
+    await close();
+  });
+
+  it('commu_look_around: 내가 있는 곳(area)·근처 장소(가까운 순, 거리)·전체 접속자 수 — 장소 이름은 생성기 글이라 untrusted 밖', async () => {
+    await call('commu_enter');
+    const look = await call('commu_look_around');
+    expect(look.data).toMatchObject({
+      position: { mapId: 'world', x: 60, y: 20 },
+      area: { concept: '동쪽 들판' },
+      onlineCount: 3,
+      people: [{ userId: 'u2', distance: 2, untrusted: { nickname: '도트' } }],
+      places: [
+        { name: '동쪽 숲', x: 50, y: 10, w: 8, h: 8, distance: 3 },
+        { name: '분수 광장', x: 12, y: 16, w: 9, h: 9, distance: 40 },
+      ],
+    });
+    expect((look.data['area'] as Structured)['place']).toBeUndefined();
+    fake.heartbeat(9);
+    await waitUntil(() => session.status().onlineCount === 9);
+    expect((await call('commu_look_around')).data['onlineCount']).toBe(9);
+  });
+
+  it('commu_move_to { place } 로 장소 안 가장 가까운 칸까지, commu_go_home 으로 첫 마을 — 10초 안 다시는 남은 초', async () => {
+    const toWoods = await call('commu_move_to', { place: '동쪽 숲' });
+    expect(toWoods.data).toMatchObject({
+      status: 'arrived',
+      position: { x: 57, y: 17 },
+      tilesMoved: 6,
+      place: { name: '동쪽 숲', x: 50, y: 10, w: 8, h: 8 },
+    });
+    expect((await call('commu_look_around')).data['area']).toEqual({
+      concept: '동쪽 들판',
+      place: '동쪽 숲',
+    });
+
+    const home = await call('commu_go_home');
+    expect(home.data).toMatchObject({
+      from: { x: 57, y: 17 },
+      position: { mapId: 'world', x: 16, y: 20 },
+      area: { concept: '첫 마을', place: '분수 광장' },
+    });
+    const look = await call('commu_look_around');
+    expect(look.data).toMatchObject({
+      position: { x: 16, y: 20 },
+      people: [{ userId: 'u3', distance: 3 }],
+    });
+    expect((look.data['places'] as Structured[])[0]).toMatchObject({
+      name: '분수 광장',
+      distance: 0,
+    });
+
+    const again = await client.callTool({ name: 'commu_go_home', arguments: {} });
+    expect(again.isError).toBe(true);
+    expect(textOf(again)).toMatch(/^마을 귀환은 10초에 한 번입니다/);
   });
 });

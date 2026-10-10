@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import contractMap from './contract/maps/main.json' with { type: 'json' };
 import type { MapGrid } from './map.js';
-import { createPathGrid, findPath, freeTileNear, manhattan } from './pathfinding.js';
+import { createPathGrid, findPath, freeTileNear, manhattan, nearestTileIn } from './pathfinding.js';
 import { mapGridSchema } from './schemas.js';
 import type { TilePoint } from './world.js';
 
@@ -102,6 +102,54 @@ describe('pathfinding (A*, 프론트 ARCHITECTURE 3.2.1 과 같은 규칙)', () 
       { x: 24, y: 15 },
     ]);
     expect(freeTileNear(boxed, around, { x: 20, y: 15 })).toBeNull();
+  });
+
+  it('nearestTileIn: 장소 영역 안에서 걸어서 가장 가까운 빈 칸 — 벽은 돌아서, 안이면 제자리, 설 칸이 없으면 no_free_tile, 닿지 않으면 no_path', () => {
+    // x=10 세로 벽, 맨 아래 줄(y=29)만 뚫림. 영역은 벽 서쪽 (7..9, 5..6)
+    const wall = grid(
+      40,
+      30,
+      Array.from({ length: 29 }, (_, y): [number, number] => [10, y]),
+    );
+    const west = { x0: 7, y0: 5, width: 3, height: 2 };
+    // 직선으로는 (9,5) 가 가깝지만 벽 너머다 — 아래로 돌아 처음 닿는 (9,6)
+    expect(nearestTileIn(createPathGrid(wall, []), { x: 11, y: 5 }, west)).toEqual({
+      tile: { x: 9, y: 6 },
+    });
+    expect(nearestTileIn(createPathGrid(wall, []), { x: 8, y: 5 }, west)).toEqual({
+      tile: { x: 8, y: 5 },
+    });
+    // 점유된 칸은 건너뛴다
+    const pair = { x0: 20, y0: 20, width: 1, height: 2 };
+    expect(
+      nearestTileIn(createPathGrid(openGrid(), [{ x: 20, y: 20 }]), { x: 25, y: 20 }, pair),
+    ).toEqual({ tile: { x: 20, y: 21 } });
+    // 영역이 전부 벽
+    expect(
+      nearestTileIn(
+        createPathGrid(wall, []),
+        { x: 11, y: 5 },
+        { x0: 10, y0: 0, width: 1, height: 4 },
+      ),
+    ).toEqual({ reason: 'no_free_tile' });
+    // 빈 칸이 있지만 벽에 갇혀 있다
+    const box = grid(40, 30, [
+      [29, 9],
+      [30, 9],
+      [31, 9],
+      [29, 10],
+      [31, 10],
+      [29, 11],
+      [30, 11],
+      [31, 11],
+    ]);
+    expect(
+      nearestTileIn(
+        createPathGrid(box, []),
+        { x: 5, y: 5 },
+        { x0: 30, y0: 10, width: 1, height: 1 },
+      ),
+    ).toEqual({ reason: 'no_path' });
   });
 
   it('계약 자산 맵: 스폰에서 열린 타일까지 길이 있고 벽은 돌아간다', () => {

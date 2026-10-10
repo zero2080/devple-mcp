@@ -174,6 +174,50 @@ function reconstruct(node: SearchNode): TilePoint[] {
 }
 
 /**
+ * 사각형 rect(장소 영역) 안에서 from 이 걸어서 가장 가까운 빈 칸 (MCP.md 5.3 { place }) — from 에서 4방향 BFS 로 처음 닿는
+ * rect 안의 칸이라 벽 너머의 가까운 칸보다 실제로 갈 수 있는 칸이 먼저다. from 이 이미 rect 안이면 from.
+ * rect 안에 벽도 점유도 아닌 칸이 없으면 no_free_tile, 있지만 탐색 범위 안에서 닿지 않으면 no_path
+ */
+export function nearestTileIn(
+  grid: PathGrid,
+  from: TilePoint,
+  rect: TileRect,
+): { tile: TilePoint } | { reason: 'no_free_tile' | 'no_path' } {
+  const inRect = (p: TilePoint): boolean =>
+    p.x >= rect.x0 && p.y >= rect.y0 && p.x < rect.x0 + rect.width && p.y < rect.y0 + rect.height;
+  const free = (p: TilePoint): boolean =>
+    !grid.isWall(p) && (!grid.isOccupied(p) || isSameTile(p, from));
+  let anyFree = false;
+  for (let y = rect.y0; y < rect.y0 + rect.height && !anyFree; y += 1) {
+    for (let x = rect.x0; x < rect.x0 + rect.width && !anyFree; x += 1) {
+      anyFree = free({ x, y });
+    }
+  }
+  if (!anyFree) return { reason: 'no_free_tile' };
+  if (inRect(from) && free(from)) return { tile: from };
+
+  const { x0, y0, width, height } = grid;
+  const key = (p: TilePoint) => (p.y - y0) * width + (p.x - x0);
+  const seen = new Set<number>([key(from)]);
+  let frontier: TilePoint[] = [from];
+  while (frontier.length > 0) {
+    const next: TilePoint[] = [];
+    for (const current of frontier) {
+      for (const step of STEPS) {
+        const p = { x: current.x + step.dx, y: current.y + step.dy };
+        if (p.x < x0 || p.y < y0 || p.x >= x0 + width || p.y >= y0 + height) continue;
+        if (seen.has(key(p)) || !free(p)) continue;
+        if (inRect(p)) return { tile: p };
+        seen.add(key(p));
+        next.push(p);
+      }
+    }
+    frontier = next;
+  }
+  return { reason: 'no_path' };
+}
+
+/**
  * around 의 주변 8칸 중 벽도 점유도 아닌 타일에서 from 에 가장 가까운(맨해튼) 것. 같으면 4방향 이웃을 먼저.
  * from 자신이 그 8칸 안이면 from (이미 옆에 있다). 없으면 null
  */

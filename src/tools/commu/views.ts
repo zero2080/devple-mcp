@@ -1,5 +1,5 @@
 // 읽기(C2)·행동(C3) 도구의 결과 모양 (MCP.md 5). 다른 사용자가 쓴 값(닉네임·상태 메시지·메시지 본문·그룹 이름)은
-// untrusted 아래에만 둔다 (MCP.md 6.1). 내가 쓴 메시지 본문만 content 로 그대로 둔다.
+// untrusted 아래에만 둔다 (MCP.md 6.1). 내가 쓴 메시지 본문만 content 로 그대로 둔다. 구역 컨셉·장소 이름은 생성기 글이라 밖에 둔다.
 import { z } from 'zod';
 
 import type { InboxItem, PublicItem } from '../../commu/inbox.js';
@@ -51,6 +51,30 @@ export function personNearby(p: NearbyPresence) {
     ...untrusted({ nickname: p.nickname }),
   };
 }
+
+/**
+ * 구역·장소 (MCP.md 5.1, DOMAIN 4.4). 컨셉·장소 이름은 서버 생성기가 만든 글이지 다른 사용자가 쓴 글이 아니라(6.1 목록 밖)
+ * untrusted 밖에 둔다 — 서버가 저장 전에 길이·한 줄·금지 내용을 검사한다
+ */
+export const areaSchema = z.object({
+  concept: z.string(),
+  /** 장소 안이면 그 이름 */
+  place: z.string().optional(),
+});
+
+export const placeSchema = z.object({
+  name: z.string(),
+  /** 영역 왼쪽 위 (전역 타일 좌표) */
+  x: z.number().int(),
+  y: z.number().int(),
+  w: z.number().int(),
+  h: z.number().int(),
+});
+
+export const placeNearbySchema = placeSchema.extend({
+  /** 내 위치에서 영역의 가장 가까운 칸까지 체비쇼프 거리 (안이면 0) */
+  distance: z.number().int(),
+});
 
 export const heardSchema = z.object({
   cursor: z.number().int(),
