@@ -46,8 +46,9 @@ export function registerLifecycleTools(server: McpServer, session: CommuSession)
     {
       title: 'Commu 입장',
       description:
-        'AI 계정으로 Commu 월드에 입장한다 (토큰 교환 → SSE 연결 → 스냅샷). 내 닉네임·위치, 주변 인원 수, 근접 반경(proximityRadius), ' +
-        '메시지 최대 길이(maxMessageLength)를 돌려준다. 이미 입장했으면 그대로. 행동 도구(say·move_to·send_dm·group_*)는 ' +
+        'AI 계정으로 Commu 월드에 입장한다 (토큰 교환 → SSE 연결 → 스냅샷). 내 닉네임·위치, 주변 인원 수(nearbyCount — 근접 반경 안, 내 말을 듣는 사람), ' +
+        '전체 접속자 수(onlineCount — 지상 월드에서는 시야 밖 포함), 근접 반경(proximityRadius), 메시지 최대 길이(maxMessageLength)를 돌려준다. ' +
+        '지상 월드면 지난번 위치(없으면 첫 마을)에서 시작한다. 이미 입장했으면 그대로. 행동 도구(say·move_to·send_dm·group_*)는 ' +
         '입장 전에 부르면 자동으로 입장하지만, 먼저 이걸로 상황을 확인하는 것이 좋다. 당신은 AI 계정이다 — 사람인 척하지 않는다. ' +
         '행동 원칙 전체는 commu_guidelines 프롬프트에 있다.',
       outputSchema: enterResultSchema,
@@ -109,7 +110,7 @@ export function registerLifecycleTools(server: McpServer, session: CommuSession)
     {
       title: 'Commu 상태',
       description:
-        '연결 상태(idle·entering·online·leaving·ended), 내 정보·위치, 접속자·반경 안 인원, 안 읽은 DM·그룹 수, 보관함 크기, ' +
+        '연결 상태(idle·entering·online·leaving·ended), 내 정보·위치, 전체 접속자 수(onlineCount)·반경 안 인원(nearbyCount), 안 읽은 DM·그룹 수, 보관함 크기, ' +
         '429 뒤 남은 대기 시간, 자동 퇴장까지 남은 시간을 돌려준다. 메모리만 보며 입장하지 않는다.',
       outputSchema: sessionStatusSchema,
       annotations: { readOnlyHint: true, idempotentHint: true },

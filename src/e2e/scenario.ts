@@ -1,4 +1,5 @@
-// 실서버 E2E 시나리오 (ROADMAP C5): 입장 → 주변 → 이동 → 근접 대화 → (상대가 있으면) 찾기·다가가기·DM → 그룹 → 보관함 → 퇴장.
+// 실서버 E2E 시나리오 (ROADMAP C5·W6): 입장 → 주변 → 이동 → 마을 귀환 → (지상 월드면) 장소로 이동 → 근접 대화
+// → (상대가 있으면) 찾기·다가가기·DM → 그룹 → 보관함 → 퇴장.
 // MCP 클라이언트로 도구를 부르므로 LLM 이 쓰는 경로 그대로다. scripts/e2e-commu.ts 가 stdio 로 실서버에,
 // scenario.test.ts 가 InMemoryTransport 로 가짜 서버에 돌린다. 결과는 renderReport 로 docs/report/ 의 HTML 이 된다.
 import type { Client } from '@modelcontextprotocol/client';
@@ -40,7 +41,7 @@ export interface ScenarioResult {
   tools: string[];
 }
 
-/** MCP.md 5 의 19종 (1.1 외형 조회, 1.2 새 메시지 기다리기 포함) */
+/** MCP.md 5 의 20종 (1.1 외형 조회, 1.2 새 메시지 기다리기, 1.3 마을 귀환 포함) */
 export const EXPECTED_TOOLS: readonly string[] = [
   'commu_enter',
   'commu_leave',
@@ -55,6 +56,7 @@ export const EXPECTED_TOOLS: readonly string[] = [
   'commu_get_appearance',
   'commu_say',
   'commu_move_to',
+  'commu_go_home',
   'commu_send_dm',
   'commu_group_send',
   'commu_group_create',
@@ -142,7 +144,7 @@ export async function runScenario(
   const names = tools.map((t) => t.name);
   const missing = EXPECTED_TOOLS.filter((n) => !names.includes(n));
   steps.push({
-    name: '도구 목록 (MCP.md 5 의 19종)',
+    name: '도구 목록 (MCP.md 5 의 20종)',
     status: missing.length === 0 ? 'ok' : 'fail',
     ms: Date.now() - listed,
     result: names.filter((n) => n.startsWith('commu_')),
@@ -205,6 +207,27 @@ export async function runScenario(
       });
   } else {
     skip('좌표로 이동', '입장 결과에 위치가 없음');
+  }
+
+  // 5b. 마을 귀환 (지상 월드는 첫 마을, 옛 맵은 스폰) → 지상 월드면 근처 장소 중 가장 가까운 곳으로
+  await call('마을 귀환', 'commu_go_home', {}, (d) =>
+    isObj(d['position']) ? undefined : 'position 이 없음',
+  );
+  const around = await call('귀환 뒤 주변 보기', 'commu_look_around');
+  const places = around && Array.isArray(around['places']) ? around['places'] : [];
+  const nearest = places.find(isObj);
+  if (nearest) {
+    await call(
+      `장소로 이동 (${String(nearest['name'])})`,
+      'commu_move_to',
+      { place: nearest['name'] },
+      (d) =>
+        d['status'] === 'arrived' ||
+        d['status'] === 'partial' ||
+        (d['status'] === 'blocked' && d['reason'] === 'no_free_tile')
+          ? undefined
+          : `status=${String(d['status'])} reason=${String(d['reason'] ?? '')}`,
+    );
   }
 
   // 6. 근접 대화 (메시지 전송 전엔 한도 때문에 잠시 쉰다)

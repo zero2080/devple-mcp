@@ -487,7 +487,7 @@ describe('CommuSession — 지상 월드 (MCP.md 3.2·5.3, W6)', () => {
     cx,
     cy,
     rows: Array<string>(SIZE).fill('.'.repeat(SIZE)),
-    places: [],
+    places: [] as Array<{ name: string; x: number; y: number; w: number; h: number }>,
     concept: 'test',
     version: 1,
   });
@@ -495,6 +495,30 @@ describe('CommuSession — 지상 월드 (MCP.md 3.2·5.3, W6)', () => {
     Array.from({ length: (2 * r + 1) ** 2 }, (_, i) =>
       chunk((i % (2 * r + 1)) - r, Math.floor(i / (2 * r + 1)) - r),
     );
+  type FakeChunk = ReturnType<typeof chunk>;
+  /** 장소가 있는 청크. water 는 청크 안 좌표 [x, y, w, h] 를 물('~')로 */
+  const chunkWith = (
+    cx: number,
+    cy: number,
+    places: FakeChunk['places'],
+    concept = 'test',
+    water?: [number, number, number, number],
+  ): FakeChunk => ({
+    ...chunk(cx, cy),
+    rows: Array.from({ length: SIZE }, (_, y) =>
+      Array.from({ length: SIZE }, (_, x) =>
+        water &&
+        x >= water[0] &&
+        x < water[0] + water[2] &&
+        y >= water[1] &&
+        y < water[1] + water[3]
+          ? '~'
+          : '.',
+      ).join(''),
+    ),
+    places,
+    concept,
+  });
   let fake: FakeCommu;
   const sessions: CommuSession[] = [];
 
@@ -601,6 +625,105 @@ describe('CommuSession — 지상 월드 (MCP.md 3.2·5.3, W6)', () => {
 
     expect(await s.moveTo({ x: 20, y: 20 })).toMatchObject({ status: 'arrived' });
     expect(chunkCalls()).toHaveLength(calls + 1);
+  });
+
+  it('commu_move_to { place }: 시야 안 그 이름의 가장 가까운 장소, 영역 안 걸어서 가장 가까운 빈 칸 — 안이면 제자리, 물이면 no_free_tile, 없으면 unknown_place', async () => {
+    const chunks = square(2).map((c) => {
+      if (c.cx === 0 && c.cy === 0)
+        return chunkWith(0, 0, [{ name: '분수 광장', x: 12, y: 16, w: 9, h: 9 }], '첫 마을');
+      if (c.cx === 1 && c.cy === 0)
+        return chunkWith(
+          1,
+          0,
+          [
+            { name: '맑은 연못', x: 40, y: 4, w: 6, h: 4 },
+            { name: '동쪽 숲', x: 50, y: 10, w: 8, h: 8 },
+          ],
+          '연못 언덕',
+          [8, 4, 6, 4],
+        );
+      if (c.cx === -1 && c.cy === 0)
+        return chunkWith(-1, 0, [{ name: '정자', x: -10, y: 20, w: 1, h: 1 }]);
+      if (c.cx === 2 && c.cy === 0)
+        return chunkWith(2, 0, [{ name: '정자', x: 70, y: 20, w: 1, h: 1 }]);
+      return c;
+    });
+    const config = await startFake({ ground: { chunks, spawn: { x: 16, y: 20 } } });
+    const s = session(config);
+    await s.enter();
+
+    expect(await s.moveTo({ place: '분수 광장' })).toMatchObject({
+      status: 'arrived',
+      tilesMoved: 0,
+      requests: 0,
+      place: { name: '분수 광장', x: 12, y: 16, w: 9, h: 9 },
+    });
+    expect(s.area()).toEqual({ concept: '첫 마을', place: '분수 광장' });
+    // 영역 (50..57, 10..17) 에서 (16,20) 에 걸어서 가장 가까운 칸은 (50,17) — 37칸
+    expect(await s.moveTo({ place: '동쪽 숲' })).toMatchObject({
+      status: 'arrived',
+      goal: { x: 50, y: 17 },
+      position: { x: 50, y: 17 },
+    });
+    expect(s.area()).toEqual({ concept: '연못 언덕', place: '동쪽 숲' });
+    expect(await s.moveTo({ place: '맑은 연못' })).toMatchObject({
+      status: 'blocked',
+      reason: 'no_free_tile',
+      requests: 0,
+      goal: { x: 45, y: 7 },
+      place: { name: '맑은 연못' },
+    });
+    // 정자는 둘 — (−10,20) 은 60칸, (70,20) 은 20칸
+    expect(await s.moveTo({ place: '정자' })).toMatchObject({
+      status: 'arrived',
+      position: { x: 70, y: 20 },
+      place: { x: 70, y: 20 },
+    });
+    expect(s.placesNearby()[0]).toMatchObject({ name: '정자', distance: 0 });
+    expect(await s.moveTo({ place: '없는 곳' })).toMatchObject({
+      status: 'blocked',
+      reason: 'unknown_place',
+      requests: 0,
+    });
+  });
+
+  it('마을 귀환: 걷던 이동은 partial 로 끝나고 첫 마을로 — 새 위치의 시야 청크를 받고, 10초 안 다시는 429 (MCP.md 5.3)', async () => {
+    const config = await startFake({ ground: { chunks: square(2), spawn: { x: 60, y: 20 } } });
+    const s = new CommuSession(config, { move: { tileMs: 20, batchMs: 40 } });
+    sessions.push(s);
+    await s.enter();
+
+    const walking = s.moveTo({ x: 95, y: 20 });
+    await waitUntil(() => puts().length >= 2);
+    const home = await s.goHome();
+    const walked = await walking;
+    expect(walked.status).toBe('partial');
+    expect(walked.tilesMoved).toBeLessThan(35);
+    expect(home).toMatchObject({
+      from: walked.position,
+      position: { mapId: 'world', x: 16, y: 20 },
+      area: { concept: 'test' },
+    });
+    expect(s.world.me()?.position).toMatchObject({ x: 16, y: 20 });
+    expect(fake.myPosition).toMatchObject({ x: 16, y: 20 });
+    // 청크 (1,0) 중심으로 받아 둔 것에 서쪽 끝(−2)이 없다 — 새 중심 (0,0) 으로 다시 받는다
+    expect(chunkCalls().at(-1)?.query).toEqual({ cx: '0', cy: '0', r: '2' });
+    const putsAfter = puts().length;
+
+    await expect(s.goHome()).rejects.toMatchObject({ code: 'RATE_LIMITED' });
+    expect(puts()).toHaveLength(putsAfter);
+  });
+
+  it('재동기화(sync.required)면 접속자와 함께 시야 청크를 다시 받는다 — 놓친 world.chunk (API_CONTRACT 3.5)', async () => {
+    const config = await startFake({ ground: { chunks: square(2), spawn: { x: 16, y: 20 } } });
+    const s = session(config);
+    await s.enter();
+    await s.moveTo({ x: 17, y: 20 });
+    expect(chunkCalls()).toHaveLength(1);
+
+    fake.emit('sync.required', { reason: 'server_restart' });
+    await waitUntil(() => chunkCalls().length === 2);
+    expect(chunkCalls()[1]?.query).toEqual({ cx: '0', cy: '0', r: '2' });
   });
 
   it('서버 chunkSize 가 지형 자산과 다르면 걷지 않고 알려 준다', async () => {

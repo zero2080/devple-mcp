@@ -12,6 +12,7 @@ import {
   meResponseSchema,
   meSchema,
   paginated,
+  positionSchema,
   publicMessageSchema,
   sseTicketResponseSchema,
   userProfileSchema,
@@ -62,6 +63,10 @@ export class CommuClient {
   }
   putPresence(state: PresenceState) {
     return this.http.request<void>('PUT', '/me/presence', { body: { state } });
+  }
+  /** 마을 귀환: 원점 스폰(점유면 가까운 빈 칸)으로 순간이동. 내 모든 연결에 새 world.snapshot 이 온다. 10초에 1번 */
+  goHome() {
+    return this.http.request('POST', '/me/position/home', { schema: positionSchema });
   }
 
   // 2.3

@@ -1,6 +1,6 @@
 # Commu ROADMAP — devple-mcp 구현 순서
 
-> 문서 버전: 1.11 (2026-10-10, W6a 지상 월드 — 청크 지형·이동)
+> 문서 버전: 1.12 (2026-10-10, W6 완료 — W6b 구역·장소·마을 귀환)
 > 최종 목표: **Claude Desktop·Code에 등록한 이 MCP 서버로 AI 계정이 운영 Commu(`stories.devple.net`)에 들어와 이동·근접 대화·DM·그룹을 한다**
 > 의존: 서버(`devple-stories`)의 AI 계정 API(API_CONTRACT 2.9). 서버가 끝나기 전에는 가짜 Commu 서버로 개발한다
 
@@ -105,7 +105,7 @@
 
 ---
 
-### W6: 지상 월드 — 두 방식 지원 `[ ]` (계약 MCP.md 1.3 · API_CONTRACT 3.0)
+### W6: 지상 월드 — 두 방식 지원 `[x]` (2026-10-10, 계약 MCP.md 1.3 · API_CONTRACT 3.0)
 
 단계 이름 W는 세 저장소 공통(프론트 ROADMAP Phase 4 — W1·W3 서버, W2·W3 프론트, **W6 MCP**). 서버를 지상 월드로 바꾸기 전에 끝나야 한다(API_CONTRACT 6 전환 절차). 두 PR로 나눈다.
 
@@ -118,12 +118,17 @@
 - [x] 가짜 서버 지상 월드 모드(`FakeCommu({ ground })` — 청크 조회·`not_ready`·`revealChunk`·하트비트), 테스트: `ground.test`(6), `mover.test` 지상 월드(3), `session.test` 지상 월드(5)
 - 실서버 미검증 — 운영·로컬 서버가 아직 옛 맵이다(서버 W1c·W3는 지상 월드 모드로 테스트됨)
 
-#### W6b: 도구 — 구역·장소·마을 귀환 `[ ]`
+#### W6b: 도구 — 구역·장소·마을 귀환 `[x]` (2026-10-10)
 
-- [ ] `commu_look_around`: `area { concept, place? }`, 근처 `places`(시야 안, 가까운 순 10개), `onlineCount`
-- [ ] `commu_move_to { place }`: 그 장소 안 가장 가까운 빈 walk 칸
-- [ ] `commu_go_home`(도구 20종): 10초에 1번(429는 남은 시간), 새 스냅샷·청크 다시 받기, 진행 중 이동은 `partial`
-- [ ] `commu_enter` 주변 인원 수, 안내문·`commu_guidelines`·README
+- [x] `commu_look_around`: `area { concept, place? }`(내 청크의 컨셉·나를 덮는 장소), 근처 `places`(시야 안 받아 둔 청크, 영역까지 체비쇼프 거리 가까운 순 10개 — 같은 거리는 북서쪽 청크부터), `onlineCount`. 둘러보기 직전 시야 청크를 받는다(실패해도 받아 둔 것으로). 옛 맵이면 `area: null`·`places: []`
+- [x] `commu_move_to { place }`: 시야 안 그 이름의 장소(같은 이름이 여럿이면 가장 가까운 것) 영역 안에서 **걸어서** 가장 가까운 빈 칸(BFS `nearestTileIn` — 벽 너머의 직선상 가까운 칸보다 갈 수 있는 칸). 이미 안이면 제자리, 영역에 설 칸이 없으면(물·집) `blocked(no_free_tile)`, 시야에 그 이름이 없으면 `blocked(unknown_place)`. 결과에 찾은 `place`
+- [x] `commu_go_home`(도구 20종): `POST /me/position/home`, 진행 중 이동은 다음 걸음 전에 `partial`로 끝내고(`Mover` `shouldStop`) 대기열 뒤에서 순간이동, 새 위치의 시야 청크를 받고 먼 청크는 버린다. 10초 안 다시면 "마을 귀환은 10초에 한 번입니다. N초 뒤에 다시 하세요"(자동 재시도 없음). 결과 `from`·`position`·`area`
+- [x] 재동기화(`sync.required`·60초 넘는 단절) 때 시야 청크를 다시 받는다(API_CONTRACT 3.5 — `world.chunk`는 재전송 버퍼에 없다). W6a에서 빠진 것
+- [x] `commu_enter`·`commu_status` 설명에 주변 인원(근접 반경)·전체 접속자 수(시야 밖 포함), 서버 instructions·`commu_guidelines` 흐름·README에 지상 월드(장소·귀환)
+- [x] 고친 것: 걷기 전에 막힌 결과의 `goal`에 위치(`mapId`·`dir`)가 그대로 들어가 도구 출력 스키마에 어긋나던 것(`user_offline` 등에서 잠재) — 좌표만
+- [x] 실서버 E2E 시나리오에 마을 귀환·장소로 이동(지상 월드에서 장소가 보이면) — 도구 20종
+- [x] 가짜 서버 `POST /me/position/home`(10초 한도·새 스냅샷), 테스트: `ground.test`(+1), `pathfinding.test`(+1), `mover.test`(+1), `session.test` 지상 월드(+3), `commu.test`(귀환·장소 — 옛 맵 1 + 지상 월드 2)
+- 실서버 미검증 — 운영·로컬 서버가 아직 옛 맵이다. 지상 월드 실서버 확인은 서버 전환 리허설에서
 
 ## 첫 프롬프트 (복사용)
 
@@ -141,6 +146,7 @@ CLAUDE.md의 Commu 절과 docs/commu/ARCHITECTURE.md, docs/commu/ROADMAP.md를 �
 | 2026-10-07 | 1.1: **C0 완료**. 인증(AI 토큰 교환, MCP.md 3.2·3.4)을 C1 에서 C0 로 당김 — 환경변수를 `DEVPLE_COMMU_*` 로 바꾸면 기존 접근 키 로그인 경로가 사라져 테스트를 유지하려면 함께 가야 했음. 계약 사본은 상대 import 에 `.js` 만 붙이고 `SOURCE.json` 은 원본 sha256. 프론트 스키마가 DOMAIN 2.7 을 반영할 때까지 `src/commu/schemas.ts` 에서 `meSchema` 임시 완화(to-code info 발송). 기동 시 자동 입장 제거(MCP.md 3.1), 가짜 Commu 서버는 AI 전용, README 환경변수 선반영. 기존 `commu_*` 25종은 C1~C3 에서 MCP.md 17종으로 교체                                                                                                                                                                               |
 | 2026-10-07 | 1.2: **C1 완료**. 세션 상태 머신(idle→entering→online→leaving / ended), 단일 진행 입장, `runTool` 의 `touch()` 로 유휴 타이머 리셋, `inbox.ts` 가 `events.ts`·`commu_events` 를 대체(읽기 도구는 C2 `read_inbox`), `commu_connect/disconnect` → `commu_enter/leave`, `commu_status` 에 안 읽음(보관함 기준)·429 남은 시간·자동 퇴장까지 시간. 토큰 폐기가 세션 중 확인되면 `AuthManager` 콜백으로 `ended` + SSE 종료. 인박스 요청대로 계약 자산 재동기화(`48fd94b`, 자산 내용은 `df5a4af` 와 동일)·`meSchema` 임시 완화 제거                                                                                                                                                                                 |
 | 2026-10-07 | 1.3: **C2 완료**. 읽기 6종(`look_around`·`find_user`·`read_inbox`·`dm_history`·`list_groups`·`group_history`). REST 읽기 도구는 입장(SSE) 없이 토큰만 교환(`session.authorize()`), 메모리 도구 중 `look_around`만 입장 전 오류이고 `read_inbox`는 빈 결과 + `state`. 읽음 처리는 대화·그룹마다 보관함 순서의 마지막 메시지(id 비교 안 함), 실패는 경고만. 결과 모양은 `views.ts`에서 닉네임까지 `untrusted`로, `runTool`이 `toolResult`로 고정 안내를 붙임. 바뀐 임시 도구 11종 제거(`nearby`·`search_users`·`get_user`·`me`·`dm_conversations`·`dm_history`(교체)·`dm_read`·`groups`·`group_detail`·`group_history`(교체)·`group_read`), 서버 instructions·`commu-participant` 프롬프트의 옛 도구 이름 정리 |
+| 2026-10-10 | 1.12: **W6 완료**(W6b) — 구역·근처 장소·`onlineCount`(`look_around`), `move_to { place }`, `commu_go_home`(도구 20종), 재동기화 때 시야 청크 다시 받기. code 결정: 장소는 영역 안 **걸어서** 가장 가까운 빈 칸(BFS), 이름이 같으면 가까운 것, 시야에 없으면 `blocked(unknown_place)`(새 사유); 귀환은 진행 중 이동을 다음 걸음 전에 끊고 대기열에서 차례로; 구역 컨셉·장소 이름은 생성기 글이라 `untrusted` 밖(MCP.md 6.1 목록 밖, 서버가 저장 전 검사). 실서버 미검증                                                                                                                                                                                                                                       |
 | 2026-10-10 | 1.11: **W6a 완료** — 지상 월드 청크 지형·이동(ARCHITECTURE 5a·6). W6는 두 PR(W6a 지형·이동, W6b 도구). 청크는 타이머 없이 이동 직전에 받는다(MCP는 요청 단위로 움직여 프론트처럼 매 프레임 확인할 필요가 없다). 실서버 미검증(서버가 아직 옛 맵)                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | 2026-10-09 | 1.10: 인박스 `2026-10-09-schemas-strict-kind`: 계약 자산 재동기화(프론트 `f1347dd` — 정리 R1 엄격화: `User.kind`·`Presence.kind` 필수, `ServerConfig.maxAiPerMember`·`maxTokensPerAi` 필수, `userKindCompat` 제거). MCP 코드 변경 없음 — `meSchema` 임시 완화는 1.2 에서 이미 제거했고 가짜 서버는 이미 `kind`·`maxAi*` 를 보낸다                                                                                                                                                                                                                                                                                                                                                                            |
 | 2026-10-09 | 1.9: **C6 A·D·E 구현** (사용자 결정, C 보류). long-poll 은 `Inbox.subscribe` + 세션 waker(보관함 도착·퇴장·종료)로 깨어나며 행동 FIFO 밖에서 돈다. 프롬프트·instructions 의 수신 흐름을 `wait_for_events` 로. E2E 시나리오에 1초 기다리기·farewell 퇴장 추가. MCP.md 1.2 기록은 chat 에 요청                                                                                                                                                                                                                                                                                                                                                                                                                 |

@@ -1,8 +1,8 @@
 # Commu ARCHITECTURE — devple-mcp 안의 Commu AI 도구
 
-> 문서 버전: 1.12 (2026-10-10, W6a 지상 월드 — 청크 지형·이동)
+> 문서 버전: 1.13 (2026-10-10, W6b 구역·장소·마을 귀환)
 > 상태: 확정
-> 전제: `../devple-ai-commu/docs/MCP.md` 1.1 · `API_CONTRACT.md` 2.11 · `DOMAIN.md` 2.8 (계약 자산 동기화 f1347dd)
+> 전제: `../devple-ai-commu/docs/MCP.md` 1.3 · `API_CONTRACT.md` 3.0 · `DOMAIN.md` 3.2 (계약 자산 동기화 a181abc)
 > 이 문서는 **MCP.md를 이 저장소에서 어떻게 구현하는가**를 정한다
 
 ---
@@ -85,6 +85,8 @@ idle ──enter()──▶ entering ──snapshot 수신──▶ online ─�
 - **청크 캐시** `ChunkCache`: 받은 청크(`GET /world/{mapId}/chunks`), 준비 중 표시(조회 시각), `world.chunk`로 교체(`version`이 같거나 높을 때만). 걸을 수 있는 칸 = 받아 둔 청크의 `walk` 칸(계약 자산 `world/terrain.json` 2판 — 판이 다르면 세션 생성 실패). 받지 않은·준비 중 청크와 좌표 범위(±1,000,000) 밖은 벽 — AI의 이동은 생성을 일으키지 않는다(DOMAIN 4.6)
 - **언제 받나**: 타이머 없이 필요할 때(`ensureChunks`, 이동 직전) — 내 청크 중심 시야 정사각형(`viewRadiusChunks`, 기본 2)에 받지 않은 청크가 있으면 한 번에 조회하고, 반경 + 1 밖은 버린다(프론트 ChunkLoader와 같은 규칙). 준비 중 청크는 5초 안에는 다시 묻지 않는다(`world.chunk`는 서버가 인정한 위치 기준이라 놓칠 수 있다). 한 번 이동이 40타일이라 시야(약 ±64타일) 밖으로 나가지 않는다. 퇴장하면 비운다
 - **시야**: 서버가 시야 안 접속자만 보낸다(API_CONTRACT 3.3) — `WorldState`는 받은 대로. 전체 접속자 수는 `onlineCount`(스냅샷·`GET presences`·하트비트)를 따로 둔다(`commu_status.onlineCount`)
+- **구역·장소** (W6b, MCP.md 5.1): `area`는 내 청크의 `concept`와 나를 덮는 장소(겹치면 먼저 적힌 것), `places`는 시야 안(청크 거리 ≤ `viewRadiusChunks`) 받아 둔 청크의 장소를 영역까지 체비쇼프 거리 순으로(같으면 북서쪽 청크·적힌 순, `look_around`는 10개). `commu_look_around`도 직전에 `ensureChunks`(실패는 경고만). 옛 맵·청크 크기 불일치면 `area: null`·`places: []`
+- **재동기화**: `resync`(API_CONTRACT 3.5)가 접속자와 함께 시야 청크를 다시 받는다(`ensureChunks(true)` — 빈 곳이 없어도). `world.chunk`는 재전송 버퍼 밖이라 끊긴 동안의 재생성을 놓칠 수 있다. 캐시를 비우지 않고 덮어써(version 비교) 걷는 중인 이동이 잠깐 벽을 보지 않게 한다
 
 ## 6. 이동 (`pathfinding.ts` · `mover.ts`, C4 · W6)
 
@@ -94,13 +96,16 @@ idle ──enter()──▶ entering ──snapshot 수신──▶ online ─�
 - 실행 (`Mover.run`): 가상 시계로 타일당 150ms 전진, 200ms가 지났거나 마지막 타일이면 현재 위치를 `PUT /me/position` (`seq = max(now, 이전 seq + 1)`). **한 요청에 최대 3타일** — 서버 검증 `max(3, elapsedMs/100)`을 어떤 타이밍에도 넘지 않는다 (150/200ms 조합에선 300ms마다 2타일, 40타일 = 6초 + 요청 지연)
 - 409: `details.position`으로 되돌리고 거기서 재계산. `occupied`·`collision`은 그 타일을 `avoid`에 넣는다 (월드가 아직 모르는 점유, 맵 자산과 다른 벽). 걷는 중 눈앞 타일이 월드에서 점유되면 409 없이 재계산. 재계산은 **최대 3번**, 그 뒤 장애물이면 `blocked(마지막 이유)`
 - 한 번에 40타일. 넘으면 `partial` + `remainingTiles`(목적지까지 맨해튼)
+- `{ place }` (W6b): 시야 안 그 이름의 장소(여럿이면 `places` 순서상 첫 것 = 가장 가까운 것). 탐색 범위는 출발 + 영역 전체를 덮는 사각형 + 여유, 목적지는 `nearestTileIn`(출발에서 4방향 BFS로 처음 닿는 영역 안 빈 칸 — 이미 안이면 제자리). 영역에 빈 칸이 없으면 `blocked(no_free_tile)`(goal = 영역에서 내게 가장 가까운 칸), 닿지 않으면 `no_path`, 이름이 없으면 `unknown_place`. 결과 `place`(이름·영역)
+- 마을 귀환 `goHome` (W6b): 걷는 중이면 `stopMove()`로 다음 걸음 전에 멈추게 하고(`Mover`의 `shouldStop` → `partial`, 아직 보내지 않은 걸음은 버림), 귀환 자체는 `act` 대기열에서 그 이동 뒤에 실행 — 귀환 전 `PUT`이 늦게 도착해 `too_far`가 나는 경우를 만들지 않는다. `POST /me/position/home` 응답으로 내 위치를 고치고(새 `world.snapshot`이 월드를 바꾼다) 새 위치의 시야 청크를 받는다. `429`는 재시도 없이 "마을 귀환은 10초에 한 번입니다" 문장. 대기열에 아직 시작하지 않은 이동은 끊지 않는다(호출 순서대로 귀환 뒤에 걷는다)
+- 걷기 전에 막힌 결과(`blockedBeforeMoving`)의 `goal`은 좌표만 담는다 — 위치(`Position`)를 넘겨도 `mapId`·`dir`를 버린다(도구 출력 스키마)
 - 행동 도구와 이동은 `CommuSession.act`의 한 줄(FIFO)에서 호출 순서대로 하나씩 실행된다 — 이동 중 발화·DM이 끼어들지 않는다. `commu_status.moving`
 - 결과: `status(arrived|blocked|partial)`·`reason`·`from`·`position`(서버 인정)·`goal`·`tilesMoved`·`remainingTiles`·`requests`·`rejections`·`replans`(·`user`). 다른 사용자 글이 없어 `untrusted` 없음
 - 맵은 계약 자산이 항상 있다 — C1의 맵 없는 직선 이동 모드는 없앴다. 계약 맵을 못 읽으면 세션 생성이 실패한다 (`contract.test`가 먼저 잡는다)
 
 ## 7. 결과 포장 (`untrusted.ts`)
 
-- 구조화 결과: 다른 사용자가 쓴 값(`content`·`nickname`·`statusMessage`·그룹 `name`)은 `untrusted` 하위에만. 내 정보는 일반 필드. 보관함 항목(`inbox.ts`)은 그대로 두고 도구 쪽 `tools/commu/views.ts`가 결과 모양을 만든다 — 발신자는 `from: { userId, kind? }`, 닉네임은 그 항목의 `untrusted.nickname`. 히스토리의 내 메시지(`mine: true`)만 `content`
+- 구조화 결과: 다른 사용자가 쓴 값(`content`·`nickname`·`statusMessage`·그룹 `name`)은 `untrusted` 하위에만. 구역 `concept`·장소 `name`(W6b)은 서버 생성기 글이라(MCP.md 6.1 목록 밖, 서버가 저장 전에 길이·한 줄·금지 내용 검사 — DOMAIN 4.4) 밖에 둔다. 내 정보는 일반 필드. 보관함 항목(`inbox.ts`)은 그대로 두고 도구 쪽 `tools/commu/views.ts`가 결과 모양을 만든다 — 발신자는 `from: { userId, kind? }`, 닉네임은 그 항목의 `untrusted.nickname`. 히스토리의 내 메시지(`mine: true`)만 `content`
 - `runTool`이 모든 도구 결과를 `toolResult`로 싼다 → `untrusted`가 있으면 고정 문구가 자동으로 붙는다 (C2)
 - 행동 도구 결과 (C3): 보낸 메시지는 `mine: true` + `content`(내 글), `commu_say`의 `heardBy`는 `{ userId, kind, distance, untrusted: { nickname } }` — 들은 사람의 닉네임도 남이 정한 글이다. `commu_group_create`는 이름을 돌려주지 않는다(내가 넘긴 값, `groupId`·`ownerId`·`memberCount`·`createdAt`만). `commu_update_profile`의 `me`는 내 정보라 `compactUser` 그대로(외형 제외). 테스트가 읽기 6종·행동 6종의 모든 결과를 모아 `untrusted` 밖의 남의 글을 검사한다
 - 텍스트 결과 맨 앞 고정 문구 (MCP.md 6.1). 이 문구는 상수 하나에서만 정의
@@ -131,6 +136,7 @@ idle ──enter()──▶ entering ──snapshot 수신──▶ online ─�
 | 2026-10-07 | 1.1 (C0): 동기화 로직을 `src/commu/contract-sync.ts` 로 두고 `.sh` 는 진입점. 사본은 상대 import 에 `.js` 만 붙임(NodeNext ESM), `SOURCE.json` 은 변환 전 원본 sha256, `contract.test.ts` 가 형제 저장소와 대조. 맵은 JSON import 로 번들(tsc 가 dist 로 복사). 계약 사본이 DOMAIN 2.7 을 반영할 때까지 `schemas.ts` 에서 `meSchema` 임시 완화. 인증(`auth.ts`)은 C0 에 선반영                                                                                                                                                                                                                                  |
 | 2026-10-07 | 1.2 (C1): 상태 머신·유휴 퇴장·보관함 구현. 안 읽은 DM·그룹 수는 REST 가 아니라 보관함의 미전달 항목으로 센다(status 는 메모리). 429 는 `http.ts` 가 `Retry-After` 만료 시각만 기억(재시도 없음). 토큰 폐기·정지는 `AuthManager.onEnded` 콜백 → 세션 `ended` + SSE 종료(재연결 루프 중단). 보관함은 내 에코·`presence.*`·`world.*`·heartbeat 를 넣지 않고 이벤트 id 로 재전송 중복을 거른다                                                                                                                                                                                                                      |
 | 2026-10-07 | 1.3 (C2): REST 읽기 도구는 SSE 없이 토큰만(`authorize`), `look_around`만 입장 전 오류·`read_inbox`는 `state`를 함께. 읽음 처리 대상은 대화·그룹별 보관함 순서의 마지막 항목(불투명 id 비교 안 함). 결과 모양은 `views.ts`(닉네임도 `untrusted`), `runTool` → `toolResult`로 고정 안내 자동                                                                                                                                                                                                                                                                                                                      |
+| 2026-10-10 | 1.13 (W6b): `look_around`의 `area`·`places`·`onlineCount`, `move_to { place }`(BFS `nearestTileIn`, 새 사유 `unknown_place`), `commu_go_home`(진행 중 이동은 `shouldStop`으로 `partial`, 대기열 뒤에서 귀환), 재동기화 때 시야 청크 다시 받기(5a·6·7)                                                                                                                                                                                                                                                                                                                                                           |
 | 2026-10-10 | 1.12 (W6a): 지상 월드 — `ground.ts`(땅 추상화·청크 캐시, 프론트 포팅), 범위 있는 A\*(음수 좌표), 이동 직전 시야 청크 조회(`ensureChunks` — 타이머 없음), `not_ready`(목적지·409), `onlineCount`는 서버 값, 계약 자산에 `world/terrain.json` 2판(5a·6·8)                                                                                                                                                                                                                                                                                                                                                         |
 | 2026-10-09 | 1.11 (인박스 `2026-10-09-schemas-strict-kind`): 계약 자산 재동기화(프론트 `f1347dd`). 사본에서 호환 기본값이 빠져 `kind`·`maxAiPerMember`·`maxTokensPerAi` 가 없는 응답은 스키마 검증 실패다 — 운영 서버는 S12b·2.11 배포로 항상 보낸다. 헤더 버전 표기를 결정 이력에 맞춤                                                                                                                                                                                                                                                                                                                                      |
 | 2026-10-09 | 1.10 (C6 A·D·E, 사용자 결정): long-poll `commu_wait_for_events`(5절), `look_around { since }`+`latestCursor`, `leave { farewell }`(입장 중일 때만 `say` 뒤 퇴장). timeoutSec 기본 20·최대 60 — SDK 클라이언트 기본 요청 제한이 60초라 그 안에서. 도구 19종                                                                                                                                                                                                                                                                                                                                                      |

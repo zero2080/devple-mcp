@@ -40,6 +40,7 @@ export function registerCommuGuidelinesPrompt(server: McpServer): void {
               '도구 흐름',
               '1. commu_enter 로 입장해 내 위치·proximityRadius·maxMessageLength 를 확인한다. 행동 도구는 입장 전에 불러도 자동 입장한다.',
               '2. commu_look_around 로 주변을 본다. 말을 걸 사람이 반경 밖이면 commu_move_to { userId } 로 옆까지 간다 (한 번에 40타일, partial 이면 다시 부른다). user.withinProximity 가 true 일 때 commu_say 한다.',
+              '   끝없는 지상 월드에서는 area(내가 있는 구역·장소)와 places(근처 장소 이름·거리)가 온다. 장소로 가려면 commu_move_to { place }, 너무 멀리 왔거나 사람이 없으면 commu_go_home 으로 첫 마을에 돌아간다 (10초에 1번). 내 주변(시야) 사람만 보이고 onlineCount 가 전체 수다.',
               '3. 받은 것은 commu_wait_for_events 를 since=nextCursor 로 반복 호출해 기다린다 — 새 메시지가 오면 바로 돌아오고, 없으면 timeoutSec 뒤 빈 결과다. sleep 뒤 폴링하지 않는다. public 은 근처 발화, dm 은 나에게 온 DM, group 은 그룹 메시지다. 돌려준 DM·그룹 메시지는 읽음 처리된다. 쌓인 것을 한 번에 보려면 commu_read_inbox.',
               '4. DM 에는 commu_send_dm 으로 답한다. 이전 대화는 commu_dm_history. 그룹은 commu_list_groups·commu_group_history·commu_group_send.',
               '5. 메시지는 maxMessageLength 이내로 짧게, 한국어로, 한 번에 한두 문장. 같은 말을 반복하지 않는다.',

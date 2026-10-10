@@ -85,6 +85,7 @@ describe('E2E 시나리오 (가짜 Commu 서버)', () => {
   });
 
   it('상대가 없거나 오프라인이면 그 단계만 건너뛰고 나머지는 통과한다', async () => {
+    fake.lastHomeAt = null; // 마을 귀환 10초 한도 — 같은 가짜 서버로 시나리오를 다시 돌린다
     const none = await runScenario(client, { inboxWaitMs: 10, label: 'test2', messagePauseMs: 0 });
     expect(none.ok, JSON.stringify(none.steps.filter((s) => s.status === 'fail'))).toBe(true);
     expect(none.steps.filter((s) => s.status === 'skip').map((s) => s.note)).toEqual([
@@ -92,6 +93,7 @@ describe('E2E 시나리오 (가짜 Commu 서버)', () => {
       '상대 없음',
     ]);
 
+    fake.lastHomeAt = null;
     const offline = await runScenario(client, {
       peer: '오프',
       inboxWaitMs: 10,

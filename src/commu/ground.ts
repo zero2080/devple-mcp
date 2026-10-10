@@ -83,6 +83,24 @@ export function chunkDistance(a: ChunkCoord, b: ChunkCoord): number {
   return Math.max(Math.abs(a.cx - b.cx), Math.abs(a.cy - b.cy));
 }
 
+/** p 에서 장소 영역의 가장 가까운 칸까지 체비쇼프 거리 (안이면 0) */
+export function placeDistance(p: TilePoint, place: Place): number {
+  const dx = Math.max(place.x - p.x, 0, p.x - (place.x + place.w - 1));
+  const dy = Math.max(place.y - p.y, 0, p.y - (place.y + place.h - 1));
+  return Math.max(dx, dy);
+}
+
+/** 내가 있는 곳 (MCP.md 5.1 commu_look_around area): 구역 컨셉과, 장소 안이면 그 이름 */
+export interface Area {
+  concept: string;
+  place?: string;
+}
+
+/** 근처 장소 (MCP.md 5.1 places): 이름·영역·거리 */
+export interface PlaceNearby extends Place {
+  distance: number;
+}
+
 /**
  * 받아 둔 지상 월드 청크 (MCP.md 3.2: 세션 동안 캐시, world.chunk 가 오면 바꾼다). 준비 중(pending) 청크는
  * 언제 조회했는지만 둔다 — 다시 물을지 정할 때 쓴다
@@ -158,6 +176,33 @@ export class ChunkCache {
     return this.get(cx, cy)?.places.find(
       (pl) => p.x >= pl.x && p.y >= pl.y && p.x < pl.x + pl.w && p.y < pl.y + pl.h,
     );
+  }
+
+  /** p 가 있는 구역: 그 청크의 컨셉과 p 를 덮는 장소 이름. 청크를 받지 않았으면 undefined */
+  areaAt(rules: TerrainRules, p: TilePoint): Area | undefined {
+    const { cx, cy } = chunkOf(p.x, p.y, rules.chunkSize);
+    const chunk = this.get(cx, cy);
+    if (!chunk) return undefined;
+    const place = this.placeAt(rules, p);
+    return { concept: chunk.concept, ...(place ? { place: place.name } : {}) };
+  }
+
+  /**
+   * 시야 안(p 의 청크에서 청크 거리 radius 이내) 받아 둔 청크의 장소를 가까운 순으로 — 거리가 같으면 북서쪽 청크·먼저 적힌 것.
+   * 같은 이름이 여럿이면 모두 (move_to { place } 는 가장 가까운 것으로 간다)
+   */
+  placesNear(rules: TerrainRules, p: TilePoint, radius: number): PlaceNearby[] {
+    const center = chunkOf(p.x, p.y, rules.chunkSize);
+    const found: PlaceNearby[] = [];
+    for (let cy = center.cy - radius; cy <= center.cy + radius; cy += 1) {
+      for (let cx = center.cx - radius; cx <= center.cx + radius; cx += 1) {
+        for (const place of this.get(cx, cy)?.places ?? []) {
+          found.push({ ...place, distance: placeDistance(p, place) });
+        }
+      }
+    }
+    // Array.prototype.sort 는 안정 정렬이라 같은 거리는 위에서 넣은 순서(북서쪽부터)를 지킨다
+    return found.sort((a, b) => a.distance - b.distance);
   }
 }
 
