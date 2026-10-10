@@ -57,6 +57,7 @@ export function listContractFiles(frontendDir: string): ContractFile[] {
     { source: 'src/domain/types.ts', target: 'types.ts' },
     ...schemas,
     { source: 'src/assets/maps/main.json', target: 'maps/main.json' },
+    { source: 'src/assets/world/terrain.json', target: 'world/terrain.json' },
   ];
 }
 

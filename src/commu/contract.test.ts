@@ -36,6 +36,7 @@ describe('계약 자산 (src/commu/contract)', () => {
     const expected = [
       'src/domain/types.ts',
       'src/assets/maps/main.json',
+      'src/assets/world/terrain.json',
       ...schemas.map((name) => `src/transport/schemas/${name}`),
     ].sort();
     expect(Object.keys(source.files).sort()).toEqual(expected);

@@ -30,17 +30,20 @@ export function chebyshev(a: TilePoint, b: TilePoint): number {
 
 /**
  * 서버가 SSE 로 보내 주는 월드 상태의 메모리 사본. 내 위치는 PUT /me/position 응답으로만 바꾼다
- * (world.positions 의 본인 항목은 무시 — API_CONTRACT 3.3).
+ * (world.positions 의 본인 항목은 무시 — API_CONTRACT 3.3). 지상 월드에서는 시야 안 접속자만 있다 (서버가 거른다).
  */
 export class WorldState {
   mapId: string | null = null;
   myUserId: string | null = null;
   serverTimeOffsetMs = 0;
+  /** 서버가 알려 준 전체 접속자 수 (AI 포함, 시야와 무관 — 스냅샷·하트비트). 아직 모르면 null */
+  onlineCount: number | null = null;
   private presences = new Map<string, Presence>();
 
   applySnapshot(snapshot: WorldSnapshotPayload, now: number = Date.now()): void {
     this.mapId = snapshot.mapId;
     this.serverTimeOffsetMs = snapshot.serverTime - now;
+    this.onlineCount = snapshot.onlineCount;
     this.presences = new Map(snapshot.presences.map((p) => [p.userId, p]));
   }
 
@@ -129,6 +132,7 @@ export class WorldState {
 
   clear(): void {
     this.mapId = null;
+    this.onlineCount = null;
     this.presences.clear();
   }
 }

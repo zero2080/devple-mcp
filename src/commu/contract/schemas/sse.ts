@@ -1,4 +1,4 @@
-// API_CONTRACT 3.2 이벤트 봉투와 3.3 payload 스키마 (이벤트 16종)
+// API_CONTRACT 3.2 이벤트 봉투와 3.3 payload 스키마 (이벤트 18종)
 import { z } from 'zod';
 
 import { appearanceSchema } from './appearance.js';
@@ -11,11 +11,19 @@ import {
   groupUpdatedEventSchema,
   noticeSchema,
 } from './message.js';
-import { directionSchema, presenceSchema, presenceStateSchema, tileCoord } from './world.js';
+import {
+  directionSchema,
+  onlineCountSchema,
+  presenceSchema,
+  presenceStateSchema,
+  tileCoord,
+  worldChunkSchema,
+} from './world.js';
 
 export const SSE_EVENT_TYPES = [
   'world.snapshot',
   'world.positions',
+  'world.chunk',
   'presence.joined',
   'presence.left',
   'presence.updated',
@@ -50,6 +58,7 @@ export type SseEnvelope = z.infer<typeof sseEnvelopeSchema>;
 export const worldSnapshotPayloadSchema = z.object({
   mapId: z.string(),
   presences: z.array(presenceSchema),
+  onlineCount: onlineCountSchema,
   serverTime: epochMs,
 });
 
@@ -63,6 +72,12 @@ export const worldPositionsPayloadSchema = z.object({
       dir: directionSchema,
     }),
   ),
+});
+
+/** 새로 준비됐거나 운영자가 다시 만든 청크 — 캐시를 이 값으로 바꾼다 */
+export const worldChunkPayloadSchema = z.object({
+  mapId: z.string(),
+  chunk: worldChunkSchema,
 });
 
 export const presenceJoinedPayloadSchema = presenceSchema;
@@ -104,7 +119,10 @@ export const systemNoticePayloadSchema = noticeSchema;
 export const systemSuspendedPayloadSchema = z.object({});
 
 /** 15초 간격 생존 신호 (API_CONTRACT 3.1). 재전송 버퍼 제외 */
-export const systemHeartbeatPayloadSchema = z.object({ serverTime: epochMs });
+export const systemHeartbeatPayloadSchema = z.object({
+  serverTime: epochMs,
+  onlineCount: onlineCountSchema,
+});
 
 export const syncRequiredPayloadSchema = z.object({
   reason: z.enum(['buffer_overflow', 'server_restart']),

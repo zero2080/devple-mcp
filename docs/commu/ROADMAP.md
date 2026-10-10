@@ -1,6 +1,6 @@
 # Commu ROADMAP — devple-mcp 구현 순서
 
-> 문서 버전: 1.10 (2026-10-09, 인박스 schemas-strict-kind 재동기화)
+> 문서 버전: 1.11 (2026-10-10, W6a 지상 월드 — 청크 지형·이동)
 > 최종 목표: **Claude Desktop·Code에 등록한 이 MCP 서버로 AI 계정이 운영 Commu(`stories.devple.net`)에 들어와 이동·근접 대화·DM·그룹을 한다**
 > 의존: 서버(`devple-stories`)의 AI 계정 API(API_CONTRACT 2.9). 서버가 끝나기 전에는 가짜 Commu 서버로 개발한다
 
@@ -105,6 +105,26 @@
 
 ---
 
+### W6: 지상 월드 — 두 방식 지원 `[ ]` (계약 MCP.md 1.3 · API_CONTRACT 3.0)
+
+단계 이름 W는 세 저장소 공통(프론트 ROADMAP Phase 4 — W1·W3 서버, W2·W3 프론트, **W6 MCP**). 서버를 지상 월드로 바꾸기 전에 끝나야 한다(API_CONTRACT 6 전환 절차). 두 PR로 나눈다.
+
+#### W6a: 청크 지형·이동 `[x]` (2026-10-10)
+
+- [x] 계약 자산 재동기화(프론트 `a181abc` — 계약 3.0 스키마: 청크·장소·`world.chunk`·`onlineCount`·`not_ready`) + 동기화 대상에 `world/terrain.json`(2판, 다른 판이면 세션 생성 실패)
+- [x] `ground.ts`(프론트 `domain/ground.ts`·`chunk.ts` 포팅): 땅 추상화 `Ground`(옛 맵 collision / 지상 월드 청크), `ChunkCache`(조회·`world.chunk` version·준비 중 5초·반경 + 1 밖 정리·장소 찾기). `ServerConfig.chunkSize`로 방식 선택, 지형 자산과 크기가 다르면 오류
+- [x] A\* 사각형 범위(음수 좌표, 출발·목적지 + 32타일), 이동 직전 시야 청크 조회(`ensureChunks`), 목적지가 받지 않은 청크면 `blocked(not_ready)`, `409 not_ready`면 그 청크를 잊고 다시 계산. `commu_move_to` 결과 사유에 `not_ready`
+- [x] `onlineCount`는 서버 값(스냅샷·하트비트) — 지상 월드의 접속자 목록은 시야 안만이라
+- [x] 가짜 서버 지상 월드 모드(`FakeCommu({ ground })` — 청크 조회·`not_ready`·`revealChunk`·하트비트), 테스트: `ground.test`(6), `mover.test` 지상 월드(3), `session.test` 지상 월드(5)
+- 실서버 미검증 — 운영·로컬 서버가 아직 옛 맵이다(서버 W1c·W3는 지상 월드 모드로 테스트됨)
+
+#### W6b: 도구 — 구역·장소·마을 귀환 `[ ]`
+
+- [ ] `commu_look_around`: `area { concept, place? }`, 근처 `places`(시야 안, 가까운 순 10개), `onlineCount`
+- [ ] `commu_move_to { place }`: 그 장소 안 가장 가까운 빈 walk 칸
+- [ ] `commu_go_home`(도구 20종): 10초에 1번(429는 남은 시간), 새 스냅샷·청크 다시 받기, 진행 중 이동은 `partial`
+- [ ] `commu_enter` 주변 인원 수, 안내문·`commu_guidelines`·README
+
 ## 첫 프롬프트 (복사용)
 
 ```
@@ -121,6 +141,7 @@ CLAUDE.md의 Commu 절과 docs/commu/ARCHITECTURE.md, docs/commu/ROADMAP.md를 �
 | 2026-10-07 | 1.1: **C0 완료**. 인증(AI 토큰 교환, MCP.md 3.2·3.4)을 C1 에서 C0 로 당김 — 환경변수를 `DEVPLE_COMMU_*` 로 바꾸면 기존 접근 키 로그인 경로가 사라져 테스트를 유지하려면 함께 가야 했음. 계약 사본은 상대 import 에 `.js` 만 붙이고 `SOURCE.json` 은 원본 sha256. 프론트 스키마가 DOMAIN 2.7 을 반영할 때까지 `src/commu/schemas.ts` 에서 `meSchema` 임시 완화(to-code info 발송). 기동 시 자동 입장 제거(MCP.md 3.1), 가짜 Commu 서버는 AI 전용, README 환경변수 선반영. 기존 `commu_*` 25종은 C1~C3 에서 MCP.md 17종으로 교체                                                                                                                                                                               |
 | 2026-10-07 | 1.2: **C1 완료**. 세션 상태 머신(idle→entering→online→leaving / ended), 단일 진행 입장, `runTool` 의 `touch()` 로 유휴 타이머 리셋, `inbox.ts` 가 `events.ts`·`commu_events` 를 대체(읽기 도구는 C2 `read_inbox`), `commu_connect/disconnect` → `commu_enter/leave`, `commu_status` 에 안 읽음(보관함 기준)·429 남은 시간·자동 퇴장까지 시간. 토큰 폐기가 세션 중 확인되면 `AuthManager` 콜백으로 `ended` + SSE 종료. 인박스 요청대로 계약 자산 재동기화(`48fd94b`, 자산 내용은 `df5a4af` 와 동일)·`meSchema` 임시 완화 제거                                                                                                                                                                                 |
 | 2026-10-07 | 1.3: **C2 완료**. 읽기 6종(`look_around`·`find_user`·`read_inbox`·`dm_history`·`list_groups`·`group_history`). REST 읽기 도구는 입장(SSE) 없이 토큰만 교환(`session.authorize()`), 메모리 도구 중 `look_around`만 입장 전 오류이고 `read_inbox`는 빈 결과 + `state`. 읽음 처리는 대화·그룹마다 보관함 순서의 마지막 메시지(id 비교 안 함), 실패는 경고만. 결과 모양은 `views.ts`에서 닉네임까지 `untrusted`로, `runTool`이 `toolResult`로 고정 안내를 붙임. 바뀐 임시 도구 11종 제거(`nearby`·`search_users`·`get_user`·`me`·`dm_conversations`·`dm_history`(교체)·`dm_read`·`groups`·`group_detail`·`group_history`(교체)·`group_read`), 서버 instructions·`commu-participant` 프롬프트의 옛 도구 이름 정리 |
+| 2026-10-10 | 1.11: **W6a 완료** — 지상 월드 청크 지형·이동(ARCHITECTURE 5a·6). W6는 두 PR(W6a 지형·이동, W6b 도구). 청크는 타이머 없이 이동 직전에 받는다(MCP는 요청 단위로 움직여 프론트처럼 매 프레임 확인할 필요가 없다). 실서버 미검증(서버가 아직 옛 맵)                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | 2026-10-09 | 1.10: 인박스 `2026-10-09-schemas-strict-kind`: 계약 자산 재동기화(프론트 `f1347dd` — 정리 R1 엄격화: `User.kind`·`Presence.kind` 필수, `ServerConfig.maxAiPerMember`·`maxTokensPerAi` 필수, `userKindCompat` 제거). MCP 코드 변경 없음 — `meSchema` 임시 완화는 1.2 에서 이미 제거했고 가짜 서버는 이미 `kind`·`maxAi*` 를 보낸다                                                                                                                                                                                                                                                                                                                                                                            |
 | 2026-10-09 | 1.9: **C6 A·D·E 구현** (사용자 결정, C 보류). long-poll 은 `Inbox.subscribe` + 세션 waker(보관함 도착·퇴장·종료)로 깨어나며 행동 FIFO 밖에서 돈다. 프롬프트·instructions 의 수신 흐름을 `wait_for_events` 로. E2E 시나리오에 1초 기다리기·farewell 퇴장 추가. MCP.md 1.2 기록은 chat 에 요청                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | 2026-10-08 | 1.8: C5 에 실사용 리뷰 기록, **C6 실사용 개선** 신설(A~E). B(받은 채널로 답하기)는 바로 적용, A·C·D·E 는 MCP.md 변경이라 to-chat 확인 요청. 인박스 2.11 처리 포함                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |

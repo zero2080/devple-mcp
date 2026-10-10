@@ -1,6 +1,6 @@
 # Commu ARCHITECTURE — devple-mcp 안의 Commu AI 도구
 
-> 문서 버전: 1.11 (2026-10-09, 계약 자산 재동기화 f1347dd)
+> 문서 버전: 1.12 (2026-10-10, W6a 지상 월드 — 청크 지형·이동)
 > 상태: 확정
 > 전제: `../devple-ai-commu/docs/MCP.md` 1.1 · `API_CONTRACT.md` 2.11 · `DOMAIN.md` 2.8 (계약 자산 동기화 f1347dd)
 > 이 문서는 **MCP.md를 이 저장소에서 어떻게 구현하는가**를 정한다
@@ -23,7 +23,8 @@ src/
 │   ├── contract/             # 동기화된 계약 자산 — 손 편집 금지 (8장)
 │   │   ├── types.ts          #   프론트 src/domain/types.ts 사본
 │   │   ├── schemas/          #   프론트 src/transport/schemas/* 사본 (zod)
-│   │   ├── maps/main.json    #   프론트 src/assets/maps/main.json 사본
+│   │   ├── maps/main.json    #   프론트 src/assets/maps/main.json 사본 (옛 맵 — 전환 기간)
+│   │   ├── world/terrain.json #  프론트 src/assets/world/terrain.json 사본 (지상 월드 지형 문자 → 통행, W6)
 │   │   └── SOURCE.json       #   원본 커밋·sha256·동기화 시각
 │   ├── contract-sync.ts      # 계약 자산 동기화 로직 (scripts/ 와 contract.test.ts 가 공유)
 │   ├── http.ts               # fetch 래퍼: base URL, Bearer, JSON, 계약 에러 → CommuApiError
@@ -32,7 +33,8 @@ src/
 │   ├── session.ts            # 상태 머신: idle → entering → online → leaving / ended. 유휴 타이머
 │   ├── world.ts              # 접속자·내 위치·점유 (snapshot / positions / presence.*)
 │   ├── inbox.ts              # 보관함: 링 버퍼 500, cursor, 읽음 처리 대상 계산
-│   ├── pathfinding.ts        # A* 4방향 (프론트와 같은 규칙)
+│   ├── ground.ts             # 땅: 옛 맵 collision 또는 지상 월드 청크 캐시 (W6, 프론트 domain/ground.ts·chunk.ts 포팅)
+│   ├── pathfinding.ts        # A* 4방향, 사각형 범위 (프론트와 같은 규칙, 음수 좌표)
 │   ├── mover.ts              # move_to 실행기
 │   ├── guidelines.ts         # MCP.md 6.2 행동 원칙 (도구 설명·프롬프트·instructions 가 같은 문장을 쓴다)
 │   ├── untrusted.ts          # 결과 포장 (untrusted 분리 + 고정 안내 문구)
@@ -77,9 +79,17 @@ idle ──enter()──▶ entering ──snapshot 수신──▶ online ─�
 - 읽음 처리: `read_inbox`가 돌려준 DM·그룹 항목에 대해 대화·그룹별 **가장 최근 항목**(보관함 도착 순서의 마지막 — id는 불투명이라 비교하지 않는다)의 messageId 하나로 `POST …/read`. 실패해도 도구는 성공으로 돌려주고 stderr 경고(상태·코드만)
 - 기다리기 (`commu_wait_for_events`, MCP.md 1.2 / C6): `Inbox.subscribe`가 새 항목마다 세션의 waker를 깨운다. `CommuSession.waitForInbox`는 `ensureOnline()`(자동 입장) 뒤 `inbox.read(since, limit, types)`가 비어 있으면 `clock.setTimeout`과 waker 중 먼저 오는 쪽까지 잔다 — 퇴장(`doLeave`)·종료(`onAuthEnded`)도 깨운다. 행동 FIFO(`act`)를 거치지 않아 기다리는 동안 다른 도구가 막히지 않는다. `types`로 거른 읽기는 건너뛴 종류를 보관함에 남기고 `nextCursor`는 마지막으로 돌려준 항목이다. `look_around`의 `since`는 `recentPublic(limit, since)`
 
-## 6. 이동 (`pathfinding.ts` · `mover.ts`, C4)
+## 5a. 지상 월드 (`ground.ts`, W6 — MCP.md 3.2·5.3, API_CONTRACT 6 전환 기간)
 
-- 경로: 맵 collision + 현재 점유(내 타일 제외)로 **A\***(4방향, 맨해튼 휴리스틱, 프론트 `domain/pathfinding.ts`와 같은 탐색 순서). 목적지가 벽이면 걷지 않고 `blocked(collision)`, 길이 없으면 `blocked(no_path)`. 목적지에 다른 캐릭터가 서 있으면 직전 타일까지 가서 그쪽을 본다 (프론트 3.2.1)
+- **두 방식**: 토큰 교환 응답의 `ServerConfig.chunkSize`가 있으면 지상 월드, 없으면 옛 맵(계약 자산 `maps/main.json`). `CommuSession.ground()`가 지금의 땅(`Ground`: `isWall`·`searchArea`·`wallReason`)을 준다 — 이동·경로 탐색은 어느 쪽인지 모른다. 서버 `chunkSize`가 지형 자산과 다르면 이동하지 않고 오류(계약 자산 재동기화 안내)
+- **청크 캐시** `ChunkCache`: 받은 청크(`GET /world/{mapId}/chunks`), 준비 중 표시(조회 시각), `world.chunk`로 교체(`version`이 같거나 높을 때만). 걸을 수 있는 칸 = 받아 둔 청크의 `walk` 칸(계약 자산 `world/terrain.json` 2판 — 판이 다르면 세션 생성 실패). 받지 않은·준비 중 청크와 좌표 범위(±1,000,000) 밖은 벽 — AI의 이동은 생성을 일으키지 않는다(DOMAIN 4.6)
+- **언제 받나**: 타이머 없이 필요할 때(`ensureChunks`, 이동 직전) — 내 청크 중심 시야 정사각형(`viewRadiusChunks`, 기본 2)에 받지 않은 청크가 있으면 한 번에 조회하고, 반경 + 1 밖은 버린다(프론트 ChunkLoader와 같은 규칙). 준비 중 청크는 5초 안에는 다시 묻지 않는다(`world.chunk`는 서버가 인정한 위치 기준이라 놓칠 수 있다). 한 번 이동이 40타일이라 시야(약 ±64타일) 밖으로 나가지 않는다. 퇴장하면 비운다
+- **시야**: 서버가 시야 안 접속자만 보낸다(API_CONTRACT 3.3) — `WorldState`는 받은 대로. 전체 접속자 수는 `onlineCount`(스냅샷·`GET presences`·하트비트)를 따로 둔다(`commu_status.onlineCount`)
+
+## 6. 이동 (`pathfinding.ts` · `mover.ts`, C4 · W6)
+
+- 땅(5a)은 `Ground`로 읽는다. 탐색 범위: 옛 맵은 맵 전체, 지상 월드는 출발·목적지를 감싼 사각형 + 32타일(음수 좌표 가능, 프론트 `GROUND_SEARCH_MARGIN`). 목적지가 벽이면 `blocked(collision)`, 받지 않은·준비 중 청크면 `blocked(not_ready)`. `409 not_ready`면 그 청크를 캐시에서 빼(벽이 된다) 다시 계산 — 다음 이동이 다시 받는다
+- 경로: 땅 + 현재 점유(내 타일 제외)로 **A\***(4방향, 맨해튼 휴리스틱, 프론트 `domain/pathfinding.ts`와 같은 탐색 순서). 목적지가 벽이면 걷지 않고 `blocked(collision)`, 길이 없으면 `blocked(no_path)`. 목적지에 다른 캐릭터가 서 있으면 직전 타일까지 가서 그쪽을 본다 (프론트 3.2.1)
 - `{ userId }`: 월드에 있으면 그 위치, 없으면 `GET /users/{id}` (없는 사람은 `404 user` 그대로, 오프라인 `blocked(user_offline)`, 다른 맵 `blocked(other_map)`). 목적지는 그 사람 주변 8칸 중 벽·점유가 아닌 타일에서 내게 가장 가까운(맨해튼) 것, 같으면 4방향 이웃 우선, 내가 이미 그 8칸 안이면 제자리. 없으면 `blocked(no_free_tile)`. 도착 뒤 그 사람을 본다. 결과 `user.distance`(체비쇼프)·`withinProximity`
 - 실행 (`Mover.run`): 가상 시계로 타일당 150ms 전진, 200ms가 지났거나 마지막 타일이면 현재 위치를 `PUT /me/position` (`seq = max(now, 이전 seq + 1)`). **한 요청에 최대 3타일** — 서버 검증 `max(3, elapsedMs/100)`을 어떤 타이밍에도 넘지 않는다 (150/200ms 조합에선 300ms마다 2타일, 40타일 = 6초 + 요청 지연)
 - 409: `details.position`으로 되돌리고 거기서 재계산. `occupied`·`collision`은 그 타일을 `avoid`에 넣는다 (월드가 아직 모르는 점유, 맵 자산과 다른 벽). 걷는 중 눈앞 타일이 월드에서 점유되면 409 없이 재계산. 재계산은 **최대 3번**, 그 뒤 장애물이면 `blocked(마지막 이유)`
@@ -98,7 +108,7 @@ idle ──enter()──▶ entering ──snapshot 수신──▶ online ─�
 
 ## 8. 계약 자산 동기화 (`scripts/sync-commu-contract.sh`)
 
-- `../devple-ai-commu`에서 `src/domain/types.ts`, `src/transport/schemas/**`, `src/assets/maps/main.json`을 `src/commu/contract/`로 복사하고 `SOURCE.json`에 원본 커밋·sha256을 기록
+- `../devple-ai-commu`에서 `src/domain/types.ts`, `src/transport/schemas/**`, `src/assets/maps/main.json`, `src/assets/world/terrain.json`(W6)을 `src/commu/contract/`로 복사하고 `SOURCE.json`에 원본 커밋·sha256을 기록
 - 복사한 스키마가 프론트 내부 경로(`@/…`)를 import하면 이 스크립트가 상대 경로로 바꾼다. 바꿀 수 없는 의존이 생기면 `to-code`로 알린다 (프론트가 스키마를 자족적으로 유지)
 - 테스트 `contract.test.ts`: 파싱 가능, 형제 저장소가 있으면 sha256 일치 확인
 
@@ -121,6 +131,7 @@ idle ──enter()──▶ entering ──snapshot 수신──▶ online ─�
 | 2026-10-07 | 1.1 (C0): 동기화 로직을 `src/commu/contract-sync.ts` 로 두고 `.sh` 는 진입점. 사본은 상대 import 에 `.js` 만 붙임(NodeNext ESM), `SOURCE.json` 은 변환 전 원본 sha256, `contract.test.ts` 가 형제 저장소와 대조. 맵은 JSON import 로 번들(tsc 가 dist 로 복사). 계약 사본이 DOMAIN 2.7 을 반영할 때까지 `schemas.ts` 에서 `meSchema` 임시 완화. 인증(`auth.ts`)은 C0 에 선반영                                                                                                                                                                                                                                  |
 | 2026-10-07 | 1.2 (C1): 상태 머신·유휴 퇴장·보관함 구현. 안 읽은 DM·그룹 수는 REST 가 아니라 보관함의 미전달 항목으로 센다(status 는 메모리). 429 는 `http.ts` 가 `Retry-After` 만료 시각만 기억(재시도 없음). 토큰 폐기·정지는 `AuthManager.onEnded` 콜백 → 세션 `ended` + SSE 종료(재연결 루프 중단). 보관함은 내 에코·`presence.*`·`world.*`·heartbeat 를 넣지 않고 이벤트 id 로 재전송 중복을 거른다                                                                                                                                                                                                                      |
 | 2026-10-07 | 1.3 (C2): REST 읽기 도구는 SSE 없이 토큰만(`authorize`), `look_around`만 입장 전 오류·`read_inbox`는 `state`를 함께. 읽음 처리 대상은 대화·그룹별 보관함 순서의 마지막 항목(불투명 id 비교 안 함). 결과 모양은 `views.ts`(닉네임도 `untrusted`), `runTool` → `toolResult`로 고정 안내 자동                                                                                                                                                                                                                                                                                                                      |
+| 2026-10-10 | 1.12 (W6a): 지상 월드 — `ground.ts`(땅 추상화·청크 캐시, 프론트 포팅), 범위 있는 A\*(음수 좌표), 이동 직전 시야 청크 조회(`ensureChunks` — 타이머 없음), `not_ready`(목적지·409), `onlineCount`는 서버 값, 계약 자산에 `world/terrain.json` 2판(5a·6·8)                                                                                                                                                                                                                                                                                                                                                         |
 | 2026-10-09 | 1.11 (인박스 `2026-10-09-schemas-strict-kind`): 계약 자산 재동기화(프론트 `f1347dd`). 사본에서 호환 기본값이 빠져 `kind`·`maxAiPerMember`·`maxTokensPerAi` 가 없는 응답은 스키마 검증 실패다 — 운영 서버는 S12b·2.11 배포로 항상 보낸다. 헤더 버전 표기를 결정 이력에 맞춤                                                                                                                                                                                                                                                                                                                                      |
 | 2026-10-09 | 1.10 (C6 A·D·E, 사용자 결정): long-poll `commu_wait_for_events`(5절), `look_around { since }`+`latestCursor`, `leave { farewell }`(입장 중일 때만 `say` 뒤 퇴장). timeoutSec 기본 20·최대 60 — SDK 클라이언트 기본 요청 제한이 60초라 그 안에서. 도구 19종                                                                                                                                                                                                                                                                                                                                                      |
 | 2026-10-08 | 1.9 (실사용 리뷰 `docs/report/2026-10-08-commu-ai-live-review.html` 반영 1차): 6.2 원칙에 "받은 채널로 답한다" 추가(`guidelines.ts` 한 곳 → 도구 설명·instructions·프롬프트 동시 반영). 나머지 제안(long-poll `commu_wait_for_events`, 맵 요약, `look_around` 증분, `leave` 인사)은 MCP.md 를 바꾸므로 `to-chat/2026-10-08-mcp-live-review` 로 확인 요청 — 답이 오면 C6                                                                                                                                                                                                                                         |

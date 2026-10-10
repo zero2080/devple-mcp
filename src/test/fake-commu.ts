@@ -4,6 +4,7 @@ import type { AddressInfo } from 'node:net';
 
 import type {
   Appearance,
+  ChunkCoord,
   DmMessage,
   Group,
   GroupMemberWithUser,
@@ -14,6 +15,7 @@ import type {
   PublicMessage,
   ServerConfig,
   User,
+  WorldChunk,
 } from '../commu/schemas.js';
 
 export const TEST_AI_TOKEN = 'dvai_test_0001';
@@ -86,13 +88,24 @@ function extractLinks(content: string): string[] {
   return (content.match(/https?:\/\/\S+/g) ?? []).slice(0, 5);
 }
 
+/** 지상 월드로 띄울 때 (W6): 청크 사본과 처음 준비된 청크 (생략하면 전부) */
+export interface FakeGround {
+  chunks: WorldChunk[];
+  ready?: ChunkCoord[];
+  spawn?: { x: number; y: number };
+}
+
+export const GROUND_CHUNK_SIZE = 32;
+
 export class FakeCommu {
   readonly calls: RecordedCall[] = [];
   readonly me: Me;
   readonly config: ServerConfig;
   readonly others = new Map<string, FakeUser>();
   readonly blockedTiles = new Set<string>();
-  myPosition: Position = { mapId: 'main', ...SPAWN, dir: 'down' };
+  /** 'main'(옛 맵) 또는 'world'(지상 월드) */
+  readonly mapId: string;
+  myPosition: Position;
   accessToken = 'access-1';
   origin = '';
   baseUrl = '';
@@ -104,8 +117,14 @@ export class FakeCommu {
   private readonly expiredTokens = new Set<string>();
   private rateLimitOnce: number | null = null;
   private presenceMissingOnce = false;
-  private positionRejects: { reason: 'collision' | 'too_far' | 'occupied'; left: number } | null =
-    null;
+  private positionRejects: {
+    reason: 'not_ready' | 'collision' | 'too_far' | 'occupied';
+    left: number;
+  } | null = null;
+  /** 지상 월드: 청크 사본(키 "cx,cy")과 준비된 청크 */
+  private readonly groundChunks = new Map<string, WorldChunk>();
+  private readonly readyChunks = new Set<string>();
+  private readonly ground: boolean;
   private readonly tickets = new Set<string>();
   private readonly streams = new Set<http.ServerResponse>();
   /** 재전송 버퍼 (API_CONTRACT 3.1: lastEventId 이후를 snapshot 뒤에 다시 보낸다) */
@@ -117,7 +136,12 @@ export class FakeCommu {
   private readonly server: http.Server;
 
   constructor(
-    opts: { me?: Partial<Me>; config?: Partial<ServerConfig>; others?: FakeUser[] } = {},
+    opts: {
+      me?: Partial<Me>;
+      config?: Partial<ServerConfig>;
+      others?: FakeUser[];
+      ground?: FakeGround;
+    } = {},
   ) {
     this.me = {
       id: 'u1',
@@ -130,7 +154,22 @@ export class FakeCommu {
       createdAt: 1_700_000_000_000,
       ...opts.me,
     };
-    this.config = { ...defaultConfig, ...opts.config };
+    this.ground = opts.ground !== undefined;
+    this.mapId = this.ground ? 'world' : 'main';
+    this.config = {
+      ...defaultConfig,
+      ...(this.ground
+        ? { defaultMapId: 'world', chunkSize: GROUND_CHUNK_SIZE, viewRadiusChunks: 2 }
+        : {}),
+      ...opts.config,
+    };
+    this.myPosition = { mapId: this.mapId, ...(opts.ground?.spawn ?? SPAWN), dir: 'down' };
+    for (const chunk of opts.ground?.chunks ?? []) {
+      this.groundChunks.set(`${String(chunk.cx)},${String(chunk.cy)}`, chunk);
+    }
+    for (const c of opts.ground?.ready ?? opts.ground?.chunks ?? []) {
+      this.readyChunks.add(`${String(c.cx)},${String(c.cy)}`);
+    }
     for (const other of opts.others ?? []) this.others.set(other.id, other);
     this.server = http.createServer((req, res) => void this.handle(req, res));
   }
@@ -192,8 +231,33 @@ export class FakeCommu {
    * 다음 count 번의 PUT /me/position 을 reason 으로 409 거부한다 (details.position 은 현재 인정 위치).
    * 월드가 아직 모르는 끼어든 사람(occupied)·서버만 아는 벽(collision)·오래된 위치(too_far) 흉내
    */
-  rejectPositions(reason: 'collision' | 'too_far' | 'occupied', count = 1): void {
+  rejectPositions(reason: 'not_ready' | 'collision' | 'too_far' | 'occupied', count = 1): void {
     this.positionRejects = { reason, left: count };
+  }
+
+  /** 지상 월드: 사본의 청크를 준비됨으로 바꾸고 world.chunk 를 보낸다 (생성 흉내) */
+  revealChunk(cx: number, cy: number): void {
+    const key = `${String(cx)},${String(cy)}`;
+    const chunk = this.groundChunks.get(key);
+    if (!chunk) throw new Error(`no chunk ${key}`);
+    this.readyChunks.add(key);
+    this.emit('world.chunk', { mapId: this.mapId, chunk });
+  }
+
+  /** system.heartbeat (전체 접속자 수) */
+  heartbeat(onlineCount = this.presences().length): void {
+    this.emit('system.heartbeat', { serverTime: Date.now(), onlineCount });
+  }
+
+  /** 지상 월드: 그 칸이 준비된 청크의 walk 칸인지 ('.' 만 walk — 계약 자산과 같은 문자) */
+  private groundTile(x: number, y: number): 'walk' | 'blocked' | 'not_ready' {
+    const cx = Math.floor(x / GROUND_CHUNK_SIZE);
+    const cy = Math.floor(y / GROUND_CHUNK_SIZE);
+    const key = `${String(cx)},${String(cy)}`;
+    const chunk = this.groundChunks.get(key);
+    if (!chunk || !this.readyChunks.has(key)) return 'not_ready';
+    const c = chunk.rows[y - cy * GROUND_CHUNK_SIZE]?.[x - cx * GROUND_CHUNK_SIZE];
+    return c === '.' || c === ',' || c === ':' || c === '=' ? 'walk' : 'blocked';
   }
 
   /** 모든 열린 SSE 스트림에 이벤트를 쓴다 */
@@ -271,7 +335,7 @@ export class FakeCommu {
       nickname: fake.nickname,
       appearance: defaultAppearance,
       kind: fake.kind ?? 'human',
-      position: { mapId: 'main', ...(fake.position ?? SPAWN), dir: 'down' },
+      position: { mapId: this.mapId, ...(fake.position ?? SPAWN), dir: 'down' },
       state: 'online',
       updatedAt: Date.now(),
     };
@@ -365,10 +429,11 @@ export class FakeCommu {
       this.streams.add(res);
       res.on('close', () => this.streams.delete(res));
       const lastEventId = url.searchParams.get('lastEventId');
+      const presences = this.presences();
       this.emitTo(
         res,
         'world.snapshot',
-        { mapId: 'main', presences: this.presences(), serverTime: Date.now() },
+        { mapId: this.mapId, presences, onlineCount: presences.length, serverTime: Date.now() },
         lastEventId ?? undefined,
       );
       if (lastEventId !== null) {
@@ -429,7 +494,7 @@ export class FakeCommu {
       const b = body as Position & { seq: number };
       if (this.streams.size === 0)
         return fail(404, 'NOT_FOUND', 'Presence 없음', { resource: 'presence' });
-      if (b.mapId !== 'main')
+      if (b.mapId !== this.mapId)
         return fail(400, 'VALIDATION_FAILED', '맵', { fields: { mapId: 'invalid' } });
       const reject = (reason: string) =>
         fail(409, 'POSITION_REJECTED', `이동 거부: ${reason}`, {
@@ -441,7 +506,18 @@ export class FakeCommu {
         this.positionRejects.left -= 1;
         return reject(this.positionRejects.reason);
       }
-      if (this.blockedTiles.has(`${b.x},${b.y}`) || b.x < 0 || b.y < 0 || b.x >= 40 || b.y >= 30) {
+      if (this.ground) {
+        const tile = this.groundTile(b.x, b.y);
+        if (tile === 'not_ready') return reject('not_ready');
+        if (tile === 'blocked' || this.blockedTiles.has(`${b.x},${b.y}`))
+          return reject('collision');
+      } else if (
+        this.blockedTiles.has(`${b.x},${b.y}`) ||
+        b.x < 0 ||
+        b.y < 0 ||
+        b.x >= 40 ||
+        b.y >= 30
+      ) {
         return reject('collision');
       }
       if (Math.max(Math.abs(b.x - this.myPosition.x), Math.abs(b.y - this.myPosition.y)) > 3) {
@@ -451,7 +527,7 @@ export class FakeCommu {
         if (other.online && other.position?.x === b.x && other.position.y === b.y)
           return reject('occupied');
       }
-      this.myPosition = { mapId: 'main', x: b.x, y: b.y, dir: b.dir };
+      this.myPosition = { mapId: this.mapId, x: b.x, y: b.y, dir: b.dir };
       return noContent();
     }
     if (method === 'PUT' && path === '/me/presence') return noContent();
@@ -473,8 +549,34 @@ export class FakeCommu {
 
     m = /^\/world\/([^/]+)\/presences$/.exec(path);
     if (method === 'GET' && m) {
-      if (m[1] !== 'main') return fail(404, 'NOT_FOUND', '맵 없음', { resource: 'map' });
-      return json(200, { mapId: 'main', presences: this.presences(), serverTime: Date.now() });
+      if (m[1] !== this.mapId) return fail(404, 'NOT_FOUND', '맵 없음', { resource: 'map' });
+      const presences = this.presences();
+      return json(200, {
+        mapId: this.mapId,
+        presences,
+        onlineCount: presences.length,
+        serverTime: Date.now(),
+      });
+    }
+
+    m = /^\/world\/([^/]+)\/chunks$/.exec(path);
+    if (method === 'GET' && m) {
+      if (!this.ground || m[1] !== this.mapId)
+        return fail(404, 'NOT_FOUND', '맵 없음', { resource: 'map' });
+      const cx = Number(url.searchParams.get('cx'));
+      const cy = Number(url.searchParams.get('cy'));
+      const r = Number(url.searchParams.get('r') ?? '0');
+      const chunks: WorldChunk[] = [];
+      const pending: ChunkCoord[] = [];
+      for (let y = cy - r; y <= cy + r; y++) {
+        for (let x = cx - r; x <= cx + r; x++) {
+          const key = `${String(x)},${String(y)}`;
+          const chunk = this.groundChunks.get(key);
+          if (chunk && this.readyChunks.has(key)) chunks.push(chunk);
+          else pending.push({ cx: x, cy: y });
+        }
+      }
+      return json(200, { mapId: this.mapId, chunks, pending });
     }
 
     if (method === 'POST' && path === '/chat/public') {
@@ -683,7 +785,7 @@ export class FakeCommu {
       user: this.userOf(user),
       online: user.online,
       ...(user.online
-        ? { position: { mapId: 'main', ...(user.position ?? SPAWN), dir: 'down' } }
+        ? { position: { mapId: this.mapId, ...(user.position ?? SPAWN), dir: 'down' } }
         : {}),
     };
   }

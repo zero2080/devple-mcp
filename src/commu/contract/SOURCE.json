@@ -1,18 +1,19 @@
 {
   "repository": "devple-ai-commu",
-  "commit": "f1347dd0b313c3139de6a76caba9d546ad3733da",
+  "commit": "a181abc29cd429c0dc9307ccce46348c5d80e72a",
   "dirty": false,
-  "syncedAt": "2026-10-09T12:06:13Z",
+  "syncedAt": "2026-10-10T06:18:40Z",
   "files": {
-    "src/domain/types.ts": "26d2facc06768f7c710b1cdc523da5eca7dcbcf1675d4505c94223063ab47757",
+    "src/domain/types.ts": "6d0a20df8e793e1b96161ce3cce1b93b7fcd1c99fc2a0decefef4f58775017ed",
     "src/transport/schemas/appearance.ts": "d876de06591a319d864037171e819d53f611e70d84b93b64318ab912440131f9",
-    "src/transport/schemas/auth.ts": "33deebd94744aee5ab6279214a4fd2f7e6b662ff5b3ef6f411d672ed893a0fb0",
+    "src/transport/schemas/auth.ts": "8beb3fd57dd58e68df4f06de6028b45a912ddd798a4c24f93b6465fd4ed4b176",
     "src/transport/schemas/common.ts": "fb27260842ccea8f2b2bf790c77e7b0d5104f79d3a3d0fb7d06b15e1a1c3d2c0",
     "src/transport/schemas/index.ts": "55966a0280e326167a521633f13133518f93e6001549c4164e0a37d7600330e9",
     "src/transport/schemas/message.ts": "25e05c0c5878d9d54d021d9c60b3973f48cae7d6b40a54470a2bbca709fd0c55",
-    "src/transport/schemas/sse.ts": "3ef5e0a2b59b23b8078cc0f41e6fb70549c8cc6290e1869af5ed0239375d4dc7",
+    "src/transport/schemas/sse.ts": "9ee2c6713ec0002dc1877abcb2b867db6e5fdb58820095b00509203b28b5475d",
     "src/transport/schemas/user.ts": "efda2508ca5711974f6c5b2daacb86c721a0b9b7a98231322a619d60abab1128",
-    "src/transport/schemas/world.ts": "955fd0e79db5a29ea7bf41387ad0f679fad2dc954e15345c3b4f972a7fd5df59",
-    "src/assets/maps/main.json": "c06846c82aa8735e54708e482fc789f9b6e69e41cd3d9226cf7ef0ea295ad7b7"
+    "src/transport/schemas/world.ts": "085cafe3bae558e5e5a34356e1df7ffbb018ee9289bc3cac60923e33ea3c91e0",
+    "src/assets/maps/main.json": "c06846c82aa8735e54708e482fc789f9b6e69e41cd3d9226cf7ef0ea295ad7b7",
+    "src/assets/world/terrain.json": "c2f25927a1d09e5188f3d632f334731680229b446da6d557486badaa8226f093"
   }
 }

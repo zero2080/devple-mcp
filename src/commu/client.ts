@@ -15,6 +15,7 @@ import {
   publicMessageSchema,
   sseTicketResponseSchema,
   userProfileSchema,
+  worldChunksResponseSchema,
   worldPresencesResponseSchema,
   type Appearance,
   type Position,
@@ -75,6 +76,13 @@ export class CommuClient {
   getPresences(mapId: string) {
     return this.http.request('GET', `/world/${enc(mapId)}/presences`, {
       schema: worldPresencesResponseSchema,
+    });
+  }
+  /** 지상 월드 청크: (cx, cy) 중심 한 변 2r+1 (조회는 생성을 일으키지 않는다) */
+  getChunks(mapId: string, cx: number, cy: number, r: number) {
+    return this.http.request('GET', `/world/${enc(mapId)}/chunks`, {
+      query: { cx: String(cx), cy: String(cy), r: String(r) },
+      schema: worldChunksResponseSchema,
     });
   }
 

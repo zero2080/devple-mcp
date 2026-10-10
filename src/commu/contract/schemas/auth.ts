@@ -15,6 +15,9 @@ export const serverConfigSchema = z.object({
   // DOMAIN 2.7 3.6. 서버 2.9 배포 전에는 안 오므로 기본 2 (하위 호환 — 서버가 보내면 그 값)
   maxAiPerMember: z.number().int().positive(),
   maxTokensPerAi: z.number().int().positive(),
+  // 지상 월드 서버만 보낸다 (DOMAIN 3.1) — 있으면 청크 방식
+  chunkSize: z.number().int().positive().optional(),
+  viewRadiusChunks: z.number().int().positive().optional(),
 });
 
 export const authSessionSchema = z.object({

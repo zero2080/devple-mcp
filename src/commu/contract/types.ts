@@ -72,6 +72,9 @@ export interface ServerConfig {
   avatarOptions: AvatarOptions; // 외형 선택지의 원천 (GRAPHICS 2.7·2.8)
   maxAiPerMember: number; // 회원당 AI 수 상한, 기본 2 (3.8)
   maxTokensPerAi: number; // AI당 활성 토큰 수 상한, 기본 2
+  // 지상 월드 서버만 보낸다 (DOMAIN 3.1). 있으면 청크 방식, 없으면 옛 맵 (API_CONTRACT 6 전환 절차)
+  chunkSize?: number; // 청크 한 변 (타일), 32 (4.4)
+  viewRadiusChunks?: number; // 시야 반경 (청크), 기본 2
 }
 
 /** 3.6 ServerConfig.avatarOptions. 목록마다 순서 있음(선택 UI 순서), 비어 있지 않음, 누구나 처음부터 고를 수 있다 */
@@ -164,6 +167,32 @@ export interface TileLayer {
   order: 'below' | 'above'; // 캐릭터 아래/위
   tiles: number[]; // width*height, 타일셋 인덱스 (-1=빈칸)
 }
+
+// 4.4 WorldChunk (지상 월드 'world'). 좌표 → 청크는 내림 나눗셈
+export interface ChunkCoord {
+  cx: number;
+  cy: number;
+}
+
+export interface WorldChunk {
+  cx: number;
+  cy: number;
+  rows: string[]; // chunkSize개, 각각 chunkSize 글자. rows[i][j] = 타일 (cx·size + j, cy·size + i)의 지형 문자 (4.5)
+  places: Place[]; // 0~3개
+  concept: string; // 생성기가 만든 글 — 일반 텍스트로만 보여 준다
+  version: number; // 1부터. 운영자가 다시 만들면 증가
+}
+
+export interface Place {
+  name: string; // 1~20자, 생성기가 만든 글
+  x: number; // 영역 왼쪽 위 (전역 타일 좌표)
+  y: number;
+  w: number;
+  h: number;
+}
+
+// 4.5 지형 문자의 통행 (계약 자산 world/terrain.json)
+export type TerrainPass = 'walk' | 'water' | 'block';
 
 /* ---------- 5. 메시지 ---------- */
 

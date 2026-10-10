@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { authSessionSchema, tileCoord } from './contract/schemas/index.js';
 import type {
   appearanceSchema,
+  chunkCoordSchema,
   meSchema,
   directionSchema,
   dmConversationWithPeerSchema,
@@ -16,6 +17,7 @@ import type {
   groupMessageSchema,
   groupSchema,
   noticeSchema,
+  placeSchema,
   positionRejectedDetailsSchema,
   positionSchema,
   presenceSchema,
@@ -23,8 +25,11 @@ import type {
   presenceUpdatedPayloadSchema,
   publicMessageSchema,
   serverConfigSchema,
+  terrainAssetSchema,
   userProfileSchema,
   userSchema,
+  worldChunkSchema,
+  worldChunksResponseSchema,
   worldPositionsPayloadSchema,
   worldPresencesResponseSchema,
   worldSnapshotPayloadSchema,
@@ -72,3 +77,8 @@ export type Notice = z.infer<typeof noticeSchema>;
 export type WorldSnapshotPayload = z.infer<typeof worldSnapshotPayloadSchema>;
 export type WorldPositionsPayload = z.infer<typeof worldPositionsPayloadSchema>;
 export type PresenceUpdatedPayload = z.infer<typeof presenceUpdatedPayloadSchema>;
+export type ChunkCoord = z.infer<typeof chunkCoordSchema>;
+export type Place = z.infer<typeof placeSchema>;
+export type WorldChunk = z.infer<typeof worldChunkSchema>;
+export type WorldChunksResponse = z.infer<typeof worldChunksResponseSchema>;
+export type TerrainPass = z.infer<typeof terrainAssetSchema>['terrain'][string]['pass'];
