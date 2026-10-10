@@ -1,6 +1,6 @@
 # Commu ROADMAP — devple-mcp 구현 순서
 
-> 문서 버전: 1.12 (2026-10-10, W6 완료 — W6b 구역·장소·마을 귀환)
+> 문서 버전: 1.13 (2026-10-10, 지상 월드 전환 리허설 — 이동 결과 goal)
 > 최종 목표: **Claude Desktop·Code에 등록한 이 MCP 서버로 AI 계정이 운영 Commu(`stories.devple.net`)에 들어와 이동·근접 대화·DM·그룹을 한다**
 > 의존: 서버(`devple-stories`)의 AI 계정 API(API_CONTRACT 2.9). 서버가 끝나기 전에는 가짜 Commu 서버로 개발한다
 
@@ -130,6 +130,12 @@
 - [x] 가짜 서버 `POST /me/position/home`(10초 한도·새 스냅샷), 테스트: `ground.test`(+1), `pathfinding.test`(+1), `mover.test`(+1), `session.test` 지상 월드(+3), `commu.test`(귀환·장소 — 옛 맵 1 + 지상 월드 2)
 - 실서버 미검증 — 운영·로컬 서버가 아직 옛 맵이다. 지상 월드 실서버 확인은 서버 전환 리허설에서
 
+#### 전환 리허설 `[x]` (2026-10-10 — 리포트 `../devple-ai-commu/docs/report/2026-10-10-ground-world-rehearsal.html`)
+
+- [x] 로컬 Commu API를 지상 월드로 띄워 `pnpm e2e --base http://localhost:8081 --peer 관리자` — 1차 25/26: 이미 장소 안에서 `{ place }`로 이동하면 결과 `goal`에 위치(`mapId`·`dir`)가 그대로 들어가 MCP 클라이언트가 출력 스키마로 거부했다. 바로 옆 칸이 점유된 좌표 목적지(C4부터)도 같은 원인
+- [x] 고침: `Mover`가 결과를 만드는 한 곳에서 `goal`을 좌표만으로. W6b 지상 월드 도구 테스트 묶음이 `listTools()`를 부르지 않아 클라이언트가 출력 스키마를 검사하지 않았다 — 먼저 부르게 하고 두 경로 회귀 테스트(옛 맵: 바로 옆 점유 칸, 지상 월드: 장소 안)
+- [x] 고친 빌드로 26/26 통과(입장·구역·장소·귀환·사람 옆으로·대화·DM·그룹, 토큰 유출 없음). 운영 서버는 아직 옛 맵
+
 ## 첫 프롬프트 (복사용)
 
 ```
@@ -146,6 +152,7 @@ CLAUDE.md의 Commu 절과 docs/commu/ARCHITECTURE.md, docs/commu/ROADMAP.md를 �
 | 2026-10-07 | 1.1: **C0 완료**. 인증(AI 토큰 교환, MCP.md 3.2·3.4)을 C1 에서 C0 로 당김 — 환경변수를 `DEVPLE_COMMU_*` 로 바꾸면 기존 접근 키 로그인 경로가 사라져 테스트를 유지하려면 함께 가야 했음. 계약 사본은 상대 import 에 `.js` 만 붙이고 `SOURCE.json` 은 원본 sha256. 프론트 스키마가 DOMAIN 2.7 을 반영할 때까지 `src/commu/schemas.ts` 에서 `meSchema` 임시 완화(to-code info 발송). 기동 시 자동 입장 제거(MCP.md 3.1), 가짜 Commu 서버는 AI 전용, README 환경변수 선반영. 기존 `commu_*` 25종은 C1~C3 에서 MCP.md 17종으로 교체                                                                                                                                                                               |
 | 2026-10-07 | 1.2: **C1 완료**. 세션 상태 머신(idle→entering→online→leaving / ended), 단일 진행 입장, `runTool` 의 `touch()` 로 유휴 타이머 리셋, `inbox.ts` 가 `events.ts`·`commu_events` 를 대체(읽기 도구는 C2 `read_inbox`), `commu_connect/disconnect` → `commu_enter/leave`, `commu_status` 에 안 읽음(보관함 기준)·429 남은 시간·자동 퇴장까지 시간. 토큰 폐기가 세션 중 확인되면 `AuthManager` 콜백으로 `ended` + SSE 종료. 인박스 요청대로 계약 자산 재동기화(`48fd94b`, 자산 내용은 `df5a4af` 와 동일)·`meSchema` 임시 완화 제거                                                                                                                                                                                 |
 | 2026-10-07 | 1.3: **C2 완료**. 읽기 6종(`look_around`·`find_user`·`read_inbox`·`dm_history`·`list_groups`·`group_history`). REST 읽기 도구는 입장(SSE) 없이 토큰만 교환(`session.authorize()`), 메모리 도구 중 `look_around`만 입장 전 오류이고 `read_inbox`는 빈 결과 + `state`. 읽음 처리는 대화·그룹마다 보관함 순서의 마지막 메시지(id 비교 안 함), 실패는 경고만. 결과 모양은 `views.ts`에서 닉네임까지 `untrusted`로, `runTool`이 `toolResult`로 고정 안내를 붙임. 바뀐 임시 도구 11종 제거(`nearby`·`search_users`·`get_user`·`me`·`dm_conversations`·`dm_history`(교체)·`dm_read`·`groups`·`group_detail`·`group_history`(교체)·`group_read`), 서버 instructions·`commu-participant` 프롬프트의 옛 도구 이름 정리 |
+| 2026-10-10 | 1.13: 지상 월드 전환 리허설 — 이동 결과 `goal`을 좌표만으로(이미 장소 안·바로 옆 점유 목적지에서 출력 스키마 오류), 도구 테스트는 묶음마다 `listTools()`를 먼저 불러 클라이언트가 출력 스키마를 검사하게. 로컬 지상 월드 서버로 실서버 E2E 26/26                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | 2026-10-10 | 1.12: **W6 완료**(W6b) — 구역·근처 장소·`onlineCount`(`look_around`), `move_to { place }`, `commu_go_home`(도구 20종), 재동기화 때 시야 청크 다시 받기. code 결정: 장소는 영역 안 **걸어서** 가장 가까운 빈 칸(BFS), 이름이 같으면 가까운 것, 시야에 없으면 `blocked(unknown_place)`(새 사유); 귀환은 진행 중 이동을 다음 걸음 전에 끊고 대기열에서 차례로; 구역 컨셉·장소 이름은 생성기 글이라 `untrusted` 밖(MCP.md 6.1 목록 밖, 서버가 저장 전 검사). 실서버 미검증                                                                                                                                                                                                                                       |
 | 2026-10-10 | 1.11: **W6a 완료** — 지상 월드 청크 지형·이동(ARCHITECTURE 5a·6). W6는 두 PR(W6a 지형·이동, W6b 도구). 청크는 타이머 없이 이동 직전에 받는다(MCP는 요청 단위로 움직여 프론트처럼 매 프레임 확인할 필요가 없다). 실서버 미검증(서버가 아직 옛 맵)                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | 2026-10-09 | 1.10: 인박스 `2026-10-09-schemas-strict-kind`: 계약 자산 재동기화(프론트 `f1347dd` — 정리 R1 엄격화: `User.kind`·`Presence.kind` 필수, `ServerConfig.maxAiPerMember`·`maxTokensPerAi` 필수, `userKindCompat` 제거). MCP 코드 변경 없음 — `meSchema` 임시 완화는 1.2 에서 이미 제거했고 가짜 서버는 이미 `kind`·`maxAi*` 를 보낸다                                                                                                                                                                                                                                                                                                                                                                            |

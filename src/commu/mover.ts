@@ -120,12 +120,13 @@ export class Mover {
     let rejections = 0;
     let replans = 0;
 
+    // goal 은 좌표만 — 목적지가 출발 위치(Position)와 같은 객체일 수 있다(이미 장소 안·바로 옆이 점유). 도구 출력 스키마가 x·y 만 받는다
     const result = (status: MoveStatus, goal: TilePoint, reason?: BlockedReason): MoveResult => ({
       status,
       ...(reason ? { reason } : {}),
       from,
       position: acked,
-      goal,
+      goal: { x: goal.x, y: goal.y },
       tilesMoved,
       remainingTiles: manhattan(acked, goal),
       requests,
